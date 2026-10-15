@@ -69,7 +69,6 @@ input[type=number]{-moz-appearance:textfield}
 <div class="row"><select id="who" onchange="cur=this.value;render()"></select></div>
 <div class="row"><button onclick="newP()">➕ Новый пользователь (старт с регистрации)</button></div>
 <div class="row"><button onclick="doLock()">📴 Свернуть (партнер свернул приложение/заблокировал телефон)</button></div></div>
-<div id="tgDebug" style="font-size:10px;color:#999;padding:4px 8px;word-break:break-all"></div>
 <div class="frame"><div class="hd" id="hd"></div><div class="body" id="bd"></div><div class="nav" id="nv"></div><div id="modal"></div></div>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script>
@@ -77,14 +76,6 @@ const TG=window.Telegram&&window.Telegram.WebApp;try{TG&&(TG.ready(),TG.expand()
 // --- Видимость демо-панели: скрыта для ВСЕХ внутри Telegram (без исключений), видна только в обычном браузере/артефакте ---
 let TG_INIT_RAW=false;try{TG_INIT_RAW=(location.hash.includes("tgWebAppData=")||location.search.includes("tgWebAppData="))}catch(e){}
 const IS_IN_TELEGRAM=!!TG||TG_INIT_RAW;
-try{
- const dbg=document.getElementById("tgDebug");
- if(dbg){
-  let topInfo="n/a";
-  try{topInfo=(window.top===window.self)?"same-window (no iframe)":"DIFFERENT window (внутри iframe!)"}catch(e){topInfo="ошибка доступа к window.top: "+e.message}
-  dbg.textContent="[ДИАГНОСТИКА, временно] TG_object:"+(!!TG)+" | hash:"+JSON.stringify(location.hash)+" | search:"+JSON.stringify(location.search)+" | frame:"+topInfo+" | TelegramWebviewProxy:"+(!!window.TelegramWebviewProxy)+" | UA:"+navigator.userAgent.slice(0,80);
- }
-}catch(e){}
 try{if(IS_IN_TELEGRAM){const dp=document.getElementById("demoPanel");if(dp)dp.style.display="none"}}catch(e){}
 const TIERS=[{n:"до 10 млн",max:1e7,base:3e4,cap:3e4},{n:"10–20 млн",max:2e7,base:5e4,cap:1e5},{n:"20–30 млн",max:3e7,base:1e5,cap:2e5},{n:"30–40 млн",max:4e7,base:2e5,cap:3e5},{n:"40–50 млн",max:5e7,base:3e5,cap:4e5}];
 const SV=["Затрудняюсь ответить","Классическая продажа","Быстрая продажа","Срочный выкуп","Подбор вторички","Подбор новостроек","Подбор зарубежной недвижимости"];

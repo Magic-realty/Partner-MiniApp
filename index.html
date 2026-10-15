@@ -77,6 +77,19 @@ const TG=window.Telegram&&window.Telegram.WebApp;try{TG&&(TG.ready(),TG.expand()
 let TG_INIT_RAW=false;try{TG_INIT_RAW=(location.hash.includes("tgWebAppData=")||location.search.includes("tgWebAppData="))}catch(e){}
 const IS_IN_TELEGRAM=!!TG||TG_INIT_RAW;
 try{if(IS_IN_TELEGRAM){const dp=document.getElementById("demoPanel");if(dp)dp.style.display="none"}}catch(e){}
+// --- Автовход в админ-панель: если приложение в Telegram открывает именно этот аккаунт, показываем админку вместо кабинета партнера ---
+const ADMIN_TG_USERNAME="vadimivanovich01"; // без @
+function getTgUser(){
+ try{
+  let raw=(location.hash.match(/tgWebAppData=([^&]*)/)||location.search.match(/tgWebAppData=([^&]*)/)||[])[1];
+  if(!raw)return null;
+  const data=new URLSearchParams(decodeURIComponent(raw));
+  const userRaw=data.get("user");
+  return userRaw?JSON.parse(userRaw):null;
+ }catch(e){return null}
+}
+const TG_USER=getTgUser();
+const IS_ADMIN_TG_ACCOUNT=!!(TG_USER&&TG_USER.username&&TG_USER.username.toLowerCase()===ADMIN_TG_USERNAME.toLowerCase());
 const TIERS=[{n:"до 10 млн",max:1e7,base:3e4,cap:3e4},{n:"10–20 млн",max:2e7,base:5e4,cap:1e5},{n:"20–30 млн",max:3e7,base:1e5,cap:2e5},{n:"30–40 млн",max:4e7,base:2e5,cap:3e5},{n:"40–50 млн",max:5e7,base:3e5,cap:4e5}];
 const SV=["Затрудняюсь ответить","Классическая продажа","Быстрая продажа","Срочный выкуп","Подбор вторички","Подбор новостроек","Подбор зарубежной недвижимости"];
 const SERVICES_INFO=[
@@ -141,6 +154,7 @@ const FAQ_PARTNER=`<div class="c"><b>Партнерское вознагражд
 </div>`;
 let U={admin:{id:"admin",nick:"@admin",activeChat:null,pairChat:null,chatSub:"support",tab:"Чаты",viewPartner:null,lastSeen:{}},p1:mk("p1","@alexey",true,"admin")},codes=[{c:"START-0001",o:"admin"}],leads=[],wd=[],L=[],dm=[],cur="p2",n=2;
 U.p2=mk("p2","",false,null);U.p1.msgs.push({t:ONB,b:1,ts:Date.now()});
+if(IS_ADMIN_TG_ACCOUNT)cur="admin"; // авто-вход в админ-панель для @vadimivanovich01 внутри Telegram
 const tier=p=>{const i=TIERS.findIndex(t=>p<t.max);return i<0?4:i};
 const bot=(u,t,b)=>U[u].msgs.push({t,b,ts:Date.now()});
 const unreadSelf=u=>u.msgs.filter(m=>(m.ts||0)>(u.lastSeen.self||0)).length;

@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Партнерка: Telegram Mini App (прототип)</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#dfe6ee;--card:#fff;--tx:#17212b;--mu:#707d8a;--ac:#2481cc;--bd:#e1e6eb;--ok:#15803d;--me:#e3f2fd;--bot:#fff}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1621;--card:#17212b;--tx:#f5f5f5;--mu:#8596a8;--ac:#5eb5f7;--bd:#243040;--ok:#4ade80;--me:#2b5278;--bot:#182533}}
+:root[data-theme="dark"]{--bg:#0e1621;--card:#17212b;--tx:#f5f5f5;--mu:#8596a8;--ac:#5eb5f7;--bd:#243040;--ok:#4ade80;--me:#2b5278;--bot:#182533}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.demo{max-width:420px;margin:0 auto;padding:8px;font-size:12px}
+.demo .row{display:flex;gap:6px;margin:4px 0}
+.frame{max-width:420px;margin:0 auto;background:var(--card);min-height:560px;display:flex;flex-direction:column;border:1px solid var(--bd);border-radius:14px;overflow:hidden;position:relative}
+.modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.42);display:flex;align-items:center;justify-content:center;z-index:20;padding:22px 16px}
+.modal{width:100%;max-height:74%;background:var(--card);display:flex;flex-direction:column;border-radius:14px;box-shadow:0 8px 28px rgba(0,0,0,.35)}
+.modal .mhd{padding:10px 14px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;font-weight:600}
+.modal .mbd{flex:1;overflow-y:auto;padding:4px 14px}
+.qbtn{width:20px;height:20px;border-radius:50%;padding:0;font-size:12px;line-height:1;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.svq{border-bottom:1px solid var(--bd)}
+.svq:last-child{border-bottom:none}
+.svq-h{padding:10px 0;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-weight:600;gap:8px}
+.svq-h .chev{transition:transform .15s;flex:none;color:var(--ac)}
+.svq-h.open .chev{transform:rotate(180deg)}
+.svq-b{padding:0 0 10px;color:var(--mu)}
+.hd{background:var(--ac);color:#fff;padding:10px 14px;font-weight:600}
+.body{flex:1;padding:10px;overflow-y:auto;max-height:64vh}
+.nav{display:flex;border-top:1px solid var(--bd)}
+.nav button{flex:1;border:0;background:none;padding:10px 2px;color:var(--mu);font-size:13px}
+.nav button.on{color:var(--ac);font-weight:600}
+button,input,select,textarea{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:7px 9px}
+input,select,textarea{width:100%;margin:3px 0}
+button{cursor:pointer}button:disabled{opacity:.4;cursor:not-allowed}.st{display:flex;gap:4px;margin-bottom:8px;font-size:11px}.st span{flex:1;text-align:center;padding:4px 2px;border-radius:6px;background:var(--bg);color:var(--mu)}.st .on{background:var(--ac);color:#fff}.st .dn{color:var(--ok)}button.p{background:var(--ac);color:#fff;border-color:var(--ac)}
+.c{border:1px solid var(--bd);border-radius:10px;padding:10px;margin:8px 0}
+.mu{color:var(--mu);font-size:12px}.ok{color:var(--ok);font-weight:600}
+.b{max-width:85%;padding:7px 10px;border-radius:12px;margin:6px 0;white-space:pre-wrap;background:var(--bot);border:1px solid var(--bd)}
+.b.me{margin-left:auto;background:var(--me)}
+.cc{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--bd);border-radius:8px;padding:2px 2px 2px 10px;font-weight:600}.cc button{padding:3px 8px;font-size:12px}.reg b{display:block;margin-bottom:14px}.reg input{margin:7px 0}.reg button{margin-top:14px}.tag{display:inline-block;padding:1px 8px;border-radius:99px;border:1px solid var(--bd);font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:4px;border-bottom:1px solid var(--bd);text-align:left}
+.r{display:flex;gap:6px}
+.pin{display:flex;justify-content:center;gap:16px;margin:16px 0}
+.pin span{width:14px;height:14px;border-radius:50%;border:1px solid var(--mu);display:inline-block}
+.pin span.f{background:var(--ac);border-color:var(--ac)}
+.pad{display:grid;grid-template-columns:repeat(3,64px);gap:14px;justify-content:center;margin-top:10px}
+.pad button{width:64px;height:64px;border-radius:50%;font-size:20px;padding:0}
+.pad button.stat{visibility:hidden;cursor:default}
+.pad button.stat.ok{visibility:visible;background:#15803d;border-color:#15803d;color:#fff}
+.pad button.stat.err{visibility:visible;background:#dc2626;border-color:#dc2626;color:#fff}
+.err-field{border-color:#dc2626!important;box-shadow:0 0 0 1px #dc2626}
+.lcard .lrow{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--bd)}
+.lcard .lrow:last-child{border-bottom:none}
+.lcard .lrow span:first-child{color:var(--mu)}
+.lcard .lrow span:last-child{text-align:right}
+.qa{padding:9px 0;border-bottom:1px solid var(--bd)}
+.qa:last-child{border-bottom:none}
+.qa b{display:block;margin-bottom:4px}
+.faqtabs{display:flex;gap:6px;margin-bottom:8px}
+.faqtabs button{flex:1}
+input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield}
+.tag.st-grey{background:#cbd5e1;color:#000;opacity:1;border-color:#94a3b8;font-weight:700}
+.tag.st-yellow{background:#fde047;color:#000;opacity:1;border-color:#eab308;font-weight:700}
+.tag.st-blue{background:#7dd3fc;color:#000;opacity:1;border-color:#38bdf8;font-weight:700}
+.tag.st-green{background:#86efac;color:#000;opacity:1;border-color:#22c55e;font-weight:700}
+.tag.st-red{background:#fca5a5;color:#000;opacity:1;border-color:#ef4444;font-weight:700}
+.badge{display:inline-block;min-width:16px;height:16px;line-height:16px;padding:0 4px;border-radius:999px;background:#ef4444;color:#fff;font-size:11px;text-align:center;font-weight:700;vertical-align:middle;margin-left:4px}
+</style></head><body>
+<div class="demo" id="demoPanel"><b>Демо-панель</b> (скрыта внутри Telegram для всех; видна только в браузере/артефакте вне Telegram)
+<div class="row"><select id="who" onchange="cur=this.value;render()"></select></div>
+<div class="row"><button onclick="newP()">➕ Новый пользователь (старт с регистрации)</button></div>
+<div class="row"><button onclick="doLock()">📴 Свернуть (партнер свернул приложение/заблокировал телефон)</button></div></div>
+<div id="tgDebug" style="font-size:10px;color:#999;padding:4px 8px;word-break:break-all"></div>
+<div class="frame"><div class="hd" id="hd"></div><div class="body" id="bd"></div><div class="nav" id="nv"></div><div id="modal"></div></div>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script>
+const TG=window.Telegram&&window.Telegram.WebApp;try{TG&&(TG.ready(),TG.expand())}catch(e){}
+// --- Видимость демо-панели: скрыта для ВСЕХ внутри Telegram (без исключений), видна только в обычном браузере/артефакте ---
+let TG_INIT_RAW=false;try{TG_INIT_RAW=(location.hash.includes("tgWebAppData=")||location.search.includes("tgWebAppData="))}catch(e){}
+const IS_IN_TELEGRAM=!!TG||TG_INIT_RAW;
+try{
+ const dbg=document.getElementById("tgDebug");
+ if(dbg){
+  let topInfo="n/a";
+  try{topInfo=(window.top===window.self)?"same-window (no iframe)":"DIFFERENT window (внутри iframe!)"}catch(e){topInfo="ошибка доступа к window.top: "+e.message}
+  dbg.textContent="[ДИАГНОСТИКА, временно] TG_object:"+(!!TG)+" | hash:"+JSON.stringify(location.hash)+" | search:"+JSON.stringify(location.search)+" | frame:"+topInfo+" | TelegramWebviewProxy:"+(!!window.TelegramWebviewProxy)+" | UA:"+navigator.userAgent.slice(0,80);
+ }
+}catch(e){}
+try{if(IS_IN_TELEGRAM){const dp=document.getElementById("demoPanel");if(dp)dp.style.display="none"}}catch(e){}
+const TIERS=[{n:"до 10 млн",max:1e7,base:3e4,cap:3e4},{n:"10–20 млн",max:2e7,base:5e4,cap:1e5},{n:"20–30 млн",max:3e7,base:1e5,cap:2e5},{n:"30–40 млн",max:4e7,base:2e5,cap:3e5},{n:"40–50 млн",max:5e7,base:3e5,cap:4e5}];
+const SV=["Затрудняюсь ответить","Классическая продажа","Быстрая продажа","Срочный выкуп","Подбор вторички","Подбор новостроек","Подбор зарубежной недвижимости"];
+const SERVICES_INFO=[
+["Классическая продажа","Комплекс активных действий, при которых продажа осуществляется по рыночной стоимости или выше за 7–28 дней."],
+["Быстрая продажа","Если клиенту срочно нужны денежные средства, но заложить объект в банк — значит получить большой дисконт, в среднем 25% от рынка. Мы разработали специальный инструмент максимального охвата, который позволяет найти покупателя на объект за 3–7 дней и сэкономить 7–15% по сравнению с предложением банка, в зависимости от срочности."],
+["Срочный выкуп","Комплекс активных действий, при которых инвестор-партнер приобретает объект с учетом скидки и ликвидности за наличный расчет в течение 2–5 дней."],
+["Подбор вторички","Агент независим от продавца и представляет / защищает только ваши интересы как покупателя. Комиссия окупается полностью в 90% случаев за счет навыков профессионального торга, четкой структуры переговоров и качественной аналитики рынка."],
+["Подбор новостроек","Агент независим от застройщика и представляет / защищает только ваши интересы. Согласуются дополнительные скидки, которых нет на сайте, а комиссию платит застройщик — независимо от выбранного вами объекта. Проводится юридическое сопровождение сделки и оформление права собственности на клиента (или лицо, представленное клиентом)."],
+["Подбор зарубежной недвижимости","Агент независим от застройщика и представляет / защищает только ваши интересы. Согласуются дополнительные скидки, которых нет на сайте, а комиссию платит застройщик — независимо от выбранного вами объекта. Проводится юридическое сопровождение сделки и оформление права собственности на клиента (или лицо, представленное клиентом) в соответствии с юрисдикцией данной страны."]
+];
+const MAIN=["Ждем подтверждения клиента","Первый контакт состоялся","Договорились о встрече","Условия согласованы","Принят в работу","Активная работа","Задаток принят","Договор подписан","Документы на регистрации","Сделка состоялась"];
+const PAUSE=["Не отвечает","Думает","Отказ"];
+const rub=n=>Math.round(n).toLocaleString("ru-RU")+" ₽";
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const $=i=>document.getElementById(i);
+const mk=(id,nick,on,inv)=>({id,nick,on,inv,reg:!!nick,codeOk:!!on,pinStage:"enter",pinBuf:"",pinFirst:null,pinResult:null,name:"",fld:"",bal:0,lim:TIERS.map(t=>t.base),msgs:[],tab:"Профиль",form:false,err:"",
+ rnVal:"",rmVal:"",rfVal:"",errNick:"",errName:"",errField:"",errFocus:null,
+ lf:"",lp:"",ls:SV[0],lcm:"",lw:"",errFio:"",errPhone:"",errComment:"",errContact:"",
+ wdForm:false,wdReqForm:false,wdSystem:"",wdStatus:"",wdFields:{},wdSum:"",wdListOpen:false,activeChat:"self",faqTab:"reward",limInfo:false,lastSeen:{},leadView:null,viewPartner:null,
+ locked:false,lockStage:"nick",lockPinBuf:"",lockErr:"",svInfo:false,svOpen:{}});
+const tierLabel=i=>{const t=TIERS[i],fmt=n=>n.toLocaleString("ru-RU");return i==0?`до<br>${fmt(t.max)}`:`от ${fmt(TIERS[i-1].max)}<br>до ${fmt(t.max)}`};
+const cap=s=>s.replace(/(^\s*|[.!?]\s+)([a-zа-яё])/gi,(m,p1,p2)=>p1+p2.toUpperCase());
+const ONB="Профиль успешно активирован!\n\nПри каждом входе в приложение необходимо:\n\n• Зайти в чат → Отправить свой никнейм → Ввести пароль\n\n• Приложение автоматически разрешит доступ ко всем вкладкам.";
+const PAYSTAT=["ИП","Самозанятость","Физическое лицо"];
+const PAYSYS_OTHER=["Банковская карта","ЮMoney"];
+const PAYSYS_IP="Расчетный счет";
+const FAQ_REWARD=`<div class="c"><b>Диапазоны и вознаграждение</b>
+<div class="r" style="justify-content:space-between;font-weight:600;margin-top:10px"><span>Стоимость объекта</span><span>Вознаграждение</span></div>
+<div class="lcard" style="margin-top:4px">
+<div class="lrow"><span>До 10 млн</span><span>30 000 за сделку</span></div>
+<div class="lrow"><span>10–20 млн</span><span>50 000 – 100 000</span></div>
+<div class="lrow"><span>20–30 млн</span><span>100 000 – 200 000</span></div>
+<div class="lrow"><span>30–40 млн</span><span>200 000 – 300 000</span></div>
+<div class="lrow"><span>40–50 млн</span><span>300 000 – 400 000</span></div>
+</div></div>
+<div class="c"><b>Частые вопросы по вознаграждению</b>
+<div class="qa"><b>❓ Как увеличить вознаграждение?</b>За каждую проведенную сделку в диапазоне вы получаете +10% от прошлого лимита к новой заявке.<br><br>
+Пример: стоимость объекта в диапазоне<br>
+от 10 000 000 до 20 000 000 ₽.<br>
+Первый лимит: 50 000<br>
+55 000 → 60 500 → 66 550 → 73 205...<br>
+Максимум в этом диапазоне — 100 000.</div>
+<div class="qa"><b>❓ Мой лимит достиг максимума, может ли он уменьшиться?</b>Нет. Достигнутый лимит сохраняется и растет только в положительную сторону.</div>
+<div class="qa"><b>❓ Как быстро происходит выплата?</b>После статуса «Сделка состоялась» и загруженных документов с суммой продажи — деньги на балансе в течение 3–7 дней. При максимальном лимите хотя бы в одной категории — в течение 1 суток.</div>
+<div class="qa"><b>❓ Как получить выплату?</b>«Профиль» → «Вывести средства» → способ получения → сумма → данные → «Подтвердить». Срок — от 10 минут до 3 дней в зависимости от способа.</div>
+</div>`;
+const FAQ_PARTNER=`<div class="c"><b>Партнерское вознаграждение</b>
+<div class="qa"><b>Кто такие партнеры?</b>Люди, которым вы дали доступ, объяснили принцип работы, ценность и качество оказываемых услуг.</div>
+<div class="qa"><b>Что показывает вкладка «Партнеры»?</b>Всех ваших приглашенных партнеров, а также:<br>• количество переданных заявок партнером;<br>• количество партнерских сделок;<br>• ваш бонус за достижения партнера;<br>• активность партнера;<br>• актуальные лимиты партнера по категориям.</div>
+<div class="qa"><b>Мой бонус за достижения партнера?</b><u>Ваш бонус</u> 10% от фактического лимита партнера с каждой его сделки. Вознаграждение партнера <u>не уменьшается</u>.</div>
+</div>
+<div class="c"><b>Частые вопросы по партнерскому вознаграждению</b>
+<div class="qa"><b>❓ Какое вознаграждение я получу за сделку партнера?</b>Партнер получает +10% к своему лимиту за сделку в диапазоне, а вы получаете бонус 10% от его фактического лимита, его выплата не уменьшается.<br><br>
+Пример:<br>
+партнер заработал 50 000 → вы 5 000<br>
+партнер заработал 55 000 → вы 5 500<br>
+партнер заработал 60 500 → вы 6 050...</div>
+<div class="qa"><b>❓ Сколько партнеров можно пригласить?</b>Неограниченное количество.</div>
+<div class="qa"><b>❓ Партнерские 10% делятся между мной и партнером?</b>Нет. Вы получаете 10% с каждой сделки приглашенного партнера, его выплата от этого не уменьшается.</div>
+<div class="qa"><b>❓ Как быстро происходит выплата?</b>После статуса «Сделка состоялась» в заявке партнера, средства поступают на ваш баланс в течение 3–7 дней (в течение 1 суток при максимальном лимите хотя бы в одной категории).</div>
+<div class="qa"><b>❓ Как получить выплату?</b>«Профиль» → «Вывести средства» → способ получения → сумма → данные → «Подтвердить». Средства поступают от 10 минут до 3 дней.</div>
+</div>`;
+let U={admin:{id:"admin",nick:"@admin",activeChat:null,pairChat:null,chatSub:"support",tab:"Чаты",viewPartner:null,lastSeen:{}},p1:mk("p1","@alexey",true,"admin")},codes=[{c:"START-0001",o:"admin"}],leads=[],wd=[],L=[],dm=[],cur="p2",n=2;
+U.p2=mk("p2","",false,null);U.p1.msgs.push({t:ONB,b:1,ts:Date.now()});
+const tier=p=>{const i=TIERS.findIndex(t=>p<t.max);return i<0?4:i};
+const bot=(u,t,b)=>U[u].msgs.push({t,b,ts:Date.now()});
+const unreadSelf=u=>u.msgs.filter(m=>(m.ts||0)>(u.lastSeen.self||0)).length;
+const unreadWith=(u,id)=>dm.filter(x=>((x.a==u.id&&x.b==id)||(x.a==id&&x.b==u.id))&&x.from==id&&x.ts>(u.lastSeen[id]||0)).length;
+function totalUnread(u){
+ if(u.id=="admin")return Object.values(U).filter(x=>x.id!="admin"&&hasDm(x.id,"admin")).reduce((s,p)=>s+unreadWith(u,p.id),0);
+ let n=unreadSelf(u);
+ contactsOf(u).forEach(id=>n+=unreadWith(u,id));
+ if(hasDm(u.id,"admin"))n+=unreadWith(u,"admin");
+ return n}
+function newP(){n++;const id="p"+n;U[id]=mk(id,"",false,null);cur=id;render()}
+function cp(t,b){const ok=()=>{b.textContent="Скопировано ✓";setTimeout(()=>{b.textContent="Копировать"},1500)};try{navigator.clipboard.writeText(t).then(ok,()=>fb())}catch(e){fb()}function fb(){const x=document.createElement("textarea");x.value=t;document.body.appendChild(x);x.select();try{document.execCommand("copy")}catch(e){}x.remove();ok()}}
+function buildPhone(d){
+ if(!d)return"";
+ const r=d.length>1?d.slice(1):"";
+ let out="+7";
+ if(r.length)out+="("+r.slice(0,3);
+ if(r.length>=3)out+=")";
+ if(r.length>3)out+=r.slice(3,6);
+ if(r.length>=6)out+="-";
+ if(r.length>6)out+=r.slice(6,8);
+ if(r.length>=8)out+="-";
+ if(r.length>8)out+=r.slice(8,10);
+ return out}
+function fmtPhone(el){let d=el.value.replace(/\D/g,"");if(d[0]=="8")d="7"+d.slice(1);if(d[0]&&d[0]!="7")d="7"+d;d=d.slice(0,11);el.value=buildPhone(d)}
+function phoneKeyDown(e,el,id){
+ if(e.key!=="Backspace")return;
+ e.preventDefault();
+ let d=el.value.replace(/\D/g,"");
+ d=d.length<=1?"":d.slice(0,-1);
+ el.value=buildPhone(d);
+ if(U[id])U[id].lp=el.value}
+function fmtThousands(el){const d=el.value.replace(/\D/g,"");el.value=d?(+d).toLocaleString("ru-RU"):""}
+function fmtCard(el){let d=el.value.replace(/\D/g,"").slice(0,16);el.value=d.replace(/(.{4})/g,"$1 ").trim()}
+function pinTap(n){const u=U[cur];if(u.pinBuf.length>=4)return;u.pinBuf+=n;u.err="";u.pinResult=null;
+ if(u.pinBuf.length==4){
+  if(u.pinStage=="enter"){
+   render();setTimeout(()=>{u.pinFirst=u.pinBuf;u.pinStage="confirm";u.pinBuf="";render()},300);return;
+  }else{
+   if(u.pinBuf==u.pinFirst){
+    u.pinResult="ok";render();
+    setTimeout(()=>{u.pin=u.pinBuf;u.on=true;u.tab="Чаты";bot(cur,ONB,1);render()},500);return;
+   }else{
+    u.pinResult="err";render();
+    setTimeout(()=>{u.err="Коды не совпадают. Придумайте новый код-пароль.";u.pinStage="enter";u.pinFirst=null;u.pinBuf="";u.pinResult=null;render()},600);return;
+   }
+  }
+ }
+ render()}
+function pinDel(){const u=U[cur];u.pinBuf=u.pinBuf.slice(0,-1);u.pinResult=null;render()}
+function doLock(){const u=U[cur];if(u.id=="admin"||!u.on)return;u.locked=true;u.lockStage="nick";u.lockPinBuf="";u.lockErr="";render()}
+function lockNickSubmit(){const u=U[cur];const v=($("lkn")?$("lkn").value:"").trim();
+ const norm=s=>s.replace(/^@/,"").toLowerCase();
+ if(!v||norm(v)!==norm(u.nick)){u.lockErr="Ник не совпадает. Попробуйте снова.";return render()}
+ u.lockErr="";u.lockStage="pin";u.lockPinBuf="";render()}
+function lockPinTap(n){const u=U[cur];if(u.lockPinBuf.length>=4)return;u.lockPinBuf+=n;u.lockErr="";
+ if(u.lockPinBuf.length==4){
+  if(u.lockPinBuf==u.pin){
+   render();
+   setTimeout(()=>{u.locked=false;u.lockStage="nick";u.lockPinBuf="";render()},400);
+   return;
+  }else{
+   render();
+   setTimeout(()=>{u.lockErr="Неверный пароль. Попробуйте снова.";u.lockPinBuf="";render()},500);
+   return;
+  }
+ }
+ render()}
+function lockPinDel(){const u=U[cur];u.lockPinBuf=u.lockPinBuf.slice(0,-1);render()}
+function toggleSvInfo(uid,name){const u=U[uid];u.svOpen=u.svOpen||{};u.svOpen[name]=!u.svOpen[name];render()}
+function svInfoModal(u){
+ return `<div class="modal-backdrop"><div class="modal">
+ <div class="mhd"><b>Описание услуг</b><button onclick="U['${u.id}'].svInfo=false;render()" style="width:28px;height:28px;padding:0;border-radius:50%;line-height:1" aria-label="Закрыть">✕</button></div>
+ <div class="mbd">${SERVICES_INFO.map(([n,d])=>{const open=!!(u.svOpen&&u.svOpen[n]);return `<div class="svq"><div class="svq-h${open?" open":""}" onclick="toggleSvInfo('${u.id}','${n.replace(/'/g,"\\'")}')">${esc(n)}<span class="chev">▾</span></div>${open?`<div class="svq-b">${esc(d)}</div>`:""}</div>`}).join("")}</div>
+ </div></div>`}
+function chatLocked(u){
+ if(u.lockStage=="nick")return `<div id="cl" style="max-height:300px;overflow-y:auto"></div>
+ <div class="r" style="margin-top:6px"><input id="lkn" placeholder="Сообщение" onkeydown="if(event.key=='Enter')lockNickSubmit()"><button class="p" onclick="lockNickSubmit()">➤</button></div>
+ <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.lockErr||"")}</div>`;
+ return `<div id="cl" style="max-height:300px;overflow-y:auto"></div>
+ <div class="c" style="text-align:center;margin-top:8px"><b>Введите пароль</b>
+ <div class="pin">${[0,1,2,3].map(i=>`<span class="${u.lockPinBuf.length>i?"f":""}"></span>`).join("")}</div>
+ <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.lockErr||"")}</div>
+ <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button onclick="lockPinTap('${n}')">${n}</button>`).join("")}<button class="stat" disabled></button><button onclick="lockPinTap('0')">0</button><button onclick="lockPinDel()">⌫</button></div></div>`}
+function stColor(st){
+ if(["Ждем подтверждения клиента","Первый контакт состоялся","Договорились о встрече","Не отвечает"].includes(st))return"st-grey";
+ if(["Условия согласованы","Принят в работу","Думает"].includes(st))return"st-yellow";
+ if(["Активная работа","Задаток принят","Договор подписан","Документы на регистрации"].includes(st))return"st-blue";
+ if(st=="Сделка состоялась")return"st-green";
+ if(st=="Отказ")return"st-red";
+ return""}
+function fmtAgo(ts){if(!ts)return"Без заявок";
+ const day=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime();
+ const diff=Math.round((day(new Date())-day(new Date(ts)))/86400000);
+ if(diff<=0)return"Новая заявка";
+ return"Без заявок ("+diff+"дн)"}
+function gen(){codes=codes.filter(c=>c.o!=cur);codes.push({c:Math.random().toString(36).slice(2,6).toUpperCase()+"-"+Math.random().toString(36).slice(2,6).toUpperCase(),o:cur});render()}
+function send(){
+ const u=U[cur];let v=$("in").value.trim();if(!v)return;if(u.on)v=cap(v);u.msgs.push({t:v,me:1});u.err="";
+ if(!u.on){
+  const m=v.match(/^(\S+)$/i),k=m&&codes.findIndex(x=>x.c==m[1].toUpperCase());
+  if(!m||k<0)bot(cur,"Неверный или использованный код.");
+  else{u.inv=codes[k].o;codes.splice(k,1);u.on=true;bot(cur,"Профиль активирован! Теперь доступны все вкладки.\nПри входе Telegram сам вас узнает, отправлять ник не нужно.",1)}
+ }else bot(cur,"Сообщение передано в поддержку.");
+ render();
+}
+function ackAny(i){const m=U[cur].msgs[i];m.b=0;m.done=1;if(m.t.startsWith("Профиль"))U[cur].msgs.push({t:"Как создать заявку?\n\n1) Нажать в чате кнопку «Создать заявку».\n\n2) Заполнить форму и отправить.\n\n3) После отправки у вас откроется новая вкладка «Заявки».\n\n4) Вкладка «Заявки» дает возможность в режиме реального времени видеть статус, комментарии, вознаграждение.",lead:1,ts:Date.now()});render()}
+function addLead(){
+ const u=U[cur],f=$("f").value.trim(),p=$("p").value.trim(),cm=$("cm").value.trim(),s=$("s").value,wEl=document.querySelector('input[name="w"]:checked');
+ u.lf=f;u.lp=p;u.ls=s;u.lcm=cm;u.lw=wEl?wEl.value:"";
+ u.errFio="";u.errPhone="";u.errComment="";u.errContact="";u.errFocus=null;
+ if(!f)u.errFio="Укажите ФИО.";
+ else if(/[A-Za-z0-9]/.test(f))u.errFio="ФИО не может содержать английские буквы или цифры.";
+ const phDigits=p.replace(/\D/g,"");
+ if(!p||p=="+7")u.errPhone="Укажите телефон клиента.";
+ else if(phDigits.length<11||phDigits[1]!=="9")u.errPhone="Укажите российский мобильный номер: +7(9XX)XXX-XX-XX.";
+ if(!cm)u.errComment="Укажите комментарий.";
+ else if(/^\d+$/.test(cm))u.errComment="Комментарий не может состоять только из цифр.";
+ if(!wEl)u.errContact="Выберите договоренность с клиентом.";
+ if(u.errFio)u.errFocus="f";
+ else if(u.errPhone)u.errFocus="p";
+ else if(u.errComment)u.errFocus="cm";
+ if(u.errFio||u.errPhone||u.errComment||u.errContact)return render();
+ if(leads.some(l=>l.ph.replace(/\D/g,"")==p.replace(/\D/g,""))){u.errPhone="Клиент уже передан (защита от дублей).";u.errFocus="p";return render()}
+ leads.push({id:leads.length+1,o:cur,fio:f,ph:p,sv:s,cm,st:MAIN[0],price:0,priceCurrent:0,rw:0,paid:0,note:"",ts:Date.now()});
+ u.form=false;u.lf="";u.lp="";u.lcm="";u.lw="";u.ls=SV[0];
+ bot(cur,"Заявка создана!\n"+f+"\n"+p+"\n"+s+"\nСтатус: "+MAIN[0]);render()}
+function upd(i){
+ const l=leads[i];
+ const newSt=$("st"+i).value,newNote=$("nt"+i).value;
+ const newPriceCurrent=+($("pr"+i).value.replace(/\D/g,"")||0);
+ const newRooms=$("rm"+i)?$("rm"+i).value.trim():(l.rooms||"");
+ const newDistrict=$("ds"+i)?$("ds"+i).value.trim():(l.district||"");
+ const newYear=$("yr"+i)?$("yr"+i).value.trim():(l.year||"");
+ const newReno=$("rv"+i)?$("rv"+i).value:(l.renovation||"");
+ U.admin.err="";
+ const statusChanged=l._lastSt!=null&&l._lastSt!==newSt;
+ const firstApply=l._lastSt==null;
+ l.st=newSt;l.note=newNote;l.priceCurrent=newPriceCurrent;l.rooms=newRooms;l.district=newDistrict;l.year=newYear;l.renovation=newReno;
+ if(l.st=="Сделка состоялась"){
+  if(!newPriceCurrent){U.admin.err="Укажите цену продажи.";return render()}
+  if(!l.paid){
+   const u=U[l.o],t=tier(newPriceCurrent);
+   l.price=newPriceCurrent;
+   l._tier=t;l._oldLim=u.lim[t];
+   const newLim=Math.min(TIERS[t].cap,Math.round(u.lim[t]*1.1));
+   l.rw=u.lim[t];l._newLim=newLim;u.lim[t]=newLim;
+   l.paid=1;l.credited=0;
+   bot(l.o,"Ура! Сделка состоялась. Зайдите во вкладку \"Заявки\", чтобы посмотреть подробнее:\n\n"+l.fio+"\n"+l.ph+"\n"+l.sv+"\nКатегория «"+TIERS[t].n+"»\nВаш лимит вырос: "+l._oldLim.toLocaleString("ru-RU")+" → "+newLim.toLocaleString("ru-RU")+".")
+  }
+ }else if(statusChanged||firstApply){
+  bot(l.o,"Статус заявки изменился: "+l.fio+"\n"+l.ph+"\n"+l.sv+". Статус: "+l.st+".");
+ }
+ l._lastSt=newSt;
+ l._applied=true;setTimeout(()=>{l._applied=false;render()},1500);
+ render()}
+function creditReward(i){
+ const l=leads[i];if(!l.paid||l.credited)return;
+ const u=U[l.o],t=l._tier;
+ u.bal+=l.rw;l.credited=1;
+ const rangeTxt=t==0?("до "+TIERS[0].max.toLocaleString("ru-RU")):("от "+TIERS[t-1].max.toLocaleString("ru-RU")+" до "+TIERS[t].max.toLocaleString("ru-RU"));
+ bot(l.o,"Вознаграждение!\nВаш баланс пополнен на "+Math.round(l.rw).toLocaleString("ru-RU")+" рублей!\nЗайдите в профиль, чтобы посмотреть достижения и получить выплату.\n\nВаше минимальное вознаграждение в категории "+rangeTxt+"\nувеличено: "+l._oldLim.toLocaleString("ru-RU")+" → "+l._newLim.toLocaleString("ru-RU"));
+ if(u.inv&&u.inv!="admin"){const b=Math.round(l.rw*.1);U[u.inv].bal+=b;L.push({to:u.inv,from:l.o,sum:b});bot(u.inv,"Бонус партнера: +"+rub(b)+" за сделку "+u.nick)}
+ render()}
+function wdSetStat(v){const u=U[cur];u.wdStatus=v;u.wdSystem=v=="ИП"?PAYSYS_IP:"";render()}
+function wdSetSys(v){U[cur].wdSystem=v;render()}
+function wdContinue(){const u=U[cur];if(!(u.wdStatus&&u.wdSystem))return;u.wdReqForm=true;render()}
+function wdFieldDefs(u){
+ if(u.wdStatus=="ИП")return[["inn","ИНН"],["kpp","КПП"],["rname","Наименование получателя"],["rs","Расчетный счет (р/с)"],["bank","Банк получателя"],["bik","БИК"],["ks","Корр. счет"]];
+ if(u.wdSystem=="Банковская карта")return[["fio","ФИО получателя"],["card","Номер карты"]];
+ if(u.wdSystem=="ЮMoney")return[["fio","ФИО получателя"],["wallet","Номер кошелька ЮMoney"]];
+ return[]}
+function wdFilled(u){const f=wdFieldDefs(u);if(!f.length)return false;
+ for(const[k]of f){const v=(u.wdFields[k]||"").trim();if(!v)return false;if(k=="card"&&v.replace(/\D/g,"").length!==16)return false}
+ return u.wdSum&&+u.wdSum>0&&+u.wdSum<=u.bal}
+function wdUpdateBtn(){const b=$("wdSubmitBtn");if(b)b.disabled=!wdFilled(U[cur])}
+function wdSubmit(){const u=U[cur];if(!wdFilled(u))return;
+ const sum=+u.wdSum;
+ wd.push({o:u.id,w:u.nick,name:u.name,fld:u.fld,s:sum,sys:u.wdSystem,stat:u.wdStatus,fields:{...u.wdFields},status:"pending",comment:"",ts:Date.now()});
+ u.bal-=sum;u.wdForm=false;u.wdReqForm=false;u.wdFields={};u.wdSum="";u.wdStatus="";u.wdSystem="";
+ bot(u.id,"Заявка на вывод средств успешно создана.");render()}
+function wdSetOpen(i){wd[i]._open=!wd[i]._open;render()}
+function wdDecide(i,dec){
+ const r=wd[i];if(r.status!=="pending")return;
+ const c=$("wdc"+i);r.comment=c?c.value.trim():"";r.status=dec;
+ const u=U[r.o];if(dec=="rejected")u.bal+=r.s;
+ bot(r.o,(dec=="approved"?"Заявка на вывод "+rub(r.s)+" одобрена.":"Заявка на вывод "+rub(r.s)+" отклонена.")+(r.comment?"\nКомментарий: "+r.comment:""));
+ render()}
+function contactsOf(u){const s=[];if(u.inv&&u.inv!="admin")s.push(u.inv);Object.values(U).forEach(x=>{if(x.id!="admin"&&x.inv==u.id)s.push(x.id)});return[...new Set(s)]}
+function hasDm(a,b){return dm.some(x=>(x.a==a&&x.b==b)||(x.a==b&&x.b==a))}
+function sendDm(){const u=U[cur],to=u.activeChat;let v=$("dmin").value.trim();if(!v||!to||to=="self")return;v=cap(v);dm.push({a:u.id,b:to,from:u.id,text:v,ts:Date.now()});render()}
+function askPartner(){const u=U[cur];if(!(u.inv&&u.inv!="admin"))return;
+ dm.push({a:u.id,b:u.inv,from:u.id,text:"Привет! Я "+(u.name||u.nick)+", ты пригласил меня в партнерку. Подскажешь по выводу средств?",ts:Date.now()});
+ u.wdForm=false;u.activeChat=u.inv;u.tab="Чаты";render()}
+function tab(t){U[cur].tab=t;render()}
+function render(){
+ $("who").innerHTML=Object.values(U).map(u=>`<option value="${u.id}" ${u.id==cur?"selected":""}>${u.id=="admin"?"Админ":(u.nick||"Новый пользователь")+(u.on?"":" (не активирован)")}</option>`).join("");
+ const u=U[cur];$("hd").textContent=u.id=="admin"?"Админ-панель":!u.reg?"Регистрация":!u.on?"Активация":"Партнерка";
+ if(u.tab=="Чаты"&&!u.locked){
+  if(u.id=="admin"){if((u.chatSub||"support")=="support"&&u.activeChat&&U[u.activeChat])u.lastSeen[u.activeChat]=Date.now()}
+  else{const key=(!u.activeChat||u.activeChat=="self")?"self":(u.activeChat=="faq"?null:u.activeChat);if(key)u.lastSeen[key]=Date.now()}
+ }
+ const tabs=u.id=="admin"?["Запросы","Чаты","Заявки","Партнеры"]:["Профиль","Чаты","Заявки","Партнеры"];
+ $("nv").innerHTML=tabs.map(t=>{const badge=t=="Чаты"&&totalUnread(u)>0?` <span class="badge">${totalUnread(u)}</span>`:"";return `<button ${(u.id!="admin"&&(!u.on||u.locked))?"disabled":""} class="${u.tab==t&&(u.id=="admin"||u.on)&&!u.locked?"on":""}" onclick="tab('${t}')">${t}${badge}</button>`}).join("");
+ $("bd").innerHTML=u.id=="admin"?({Чаты:admChatsView,Партнеры:admPartnersView,Заявки:admLeadsView,Запросы:admWdView}[u.tab||"Чаты"])():!u.on?gate(u):u.locked?chatLocked(u):({Профиль:prof,Чаты:chat,Заявки:req,Партнеры:prt}[u.tab])(u);
+ $("modal").innerHTML=u.svInfo?svInfoModal(u):"";
+ const c=$("cl");if(c)c.scrollTop=c.scrollHeight;
+ if(u.errFocus){const el=$(u.errFocus);if(el){el.focus();if(el.select)el.select()}u.errFocus=null}}
+function steps(u){const a=["Регистрация","Активация","Обучение","Работа"],k=!u.reg?0:!u.on?1:u.msgs.some(m=>m.b)?2:3;return `<div class="st">${a.map((x,i)=>`<span class="${i==k?"on":i<k?"dn":""}">${i<k?"✓ ":""}${x}</span>`).join("")}</div>`}
+function gate(u){
+ if(!u.reg)return steps(u)+`<div class="c reg"><b>Регистрация партнера</b>
+ <input id="rn" placeholder="Ник @ivan" value="${esc(u.rnVal||"")}" class="${u.errNick?"err-field":""}" oninput="U['${u.id}'].rnVal=this.value"><div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errNick||"")}</div>
+ <input id="rm" placeholder="Имя" value="${esc(u.rmVal||"")}" class="${u.errName?"err-field":""}" oninput="U['${u.id}'].rmVal=this.value" onblur="this.value=cap(this.value);U['${u.id}'].rmVal=this.value"><div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errName||"")}</div>
+ <input id="rf" placeholder="Сфера деятельности" value="${esc(u.rfVal||"")}" class="${u.errField?"err-field":""}" oninput="U['${u.id}'].rfVal=this.value" onblur="this.value=cap(this.value);U['${u.id}'].rfVal=this.value"><div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errField||"")}</div>
+ <button class="p" onclick="doReg()">Зарегистрироваться</button></div>`;
+ if(!u.codeOk)return steps(u)+`<div class="c"><b>Активация профиля</b><p class="mu">Введите код приглашения от администратора или партнера.</p>
+ <input id="ac" placeholder="XXXX-XXXX" onkeydown="if(event.key=='Enter')act()"><div class="mu" style="color:#c0392b">${esc(u.err)}</div><button class="p" style="margin-top:16px" onclick="act()">Отправить</button></div>`;
+ return steps(u)+`<div class="c" style="text-align:center"><b>${u.pinStage=="enter"?"Придумайте код-пароль":"Повторите код-пароль"}</b>
+ <p class="mu">${u.pinStage=="enter"?"4 цифры для входа в приложение":"Введите код-пароль еще раз для подтверждения"}</p>
+ <div class="pin">${[0,1,2,3].map(i=>`<span class="${u.pinBuf.length>i?"f":""}"></span>`).join("")}</div>
+ <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.err)}</div>
+ <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button onclick="pinTap('${n}')">${n}</button>`).join("")}<button class="stat ${u.pinResult||""}" disabled>${u.pinResult=="ok"?"✓":u.pinResult=="err"?"✕":""}</button><button onclick="pinTap('0')">0</button><button onclick="pinDel()">⌫</button></div></div>`}
+function doReg(){const u=U[cur],nk=$("rn").value.trim(),nm=$("rm").value.trim(),fl=$("rf").value.trim();
+ u.rnVal=nk;u.rmVal=nm;u.rfVal=fl;
+ u.errNick="";u.errName="";u.errField="";u.errFocus=null;
+ if(!nk)u.errNick="Укажите ник.";
+ else if(/[А-Яа-яЁё]/.test(nk))u.errNick="Ник не может быть на русском языке. Используйте латиницу, цифры, @ и _.";
+ else if(/^@?\d+$/.test(nk))u.errNick="Ник не может состоять только из цифр.";
+ if(!nm)u.errName="Укажите имя.";
+ else if(/[A-Za-z0-9]/.test(nm))u.errName="Имя должно быть на русском языке, без цифр.";
+ if(fl&&/[A-Za-z0-9]/.test(fl))u.errField="Сфера деятельности должна быть на русском языке, без цифр.";
+ if(u.errNick)u.errFocus="rn";else if(u.errName)u.errFocus="rm";else if(u.errField)u.errFocus="rf";
+ if(u.errNick||u.errName||u.errField)return render();
+ u.nick=nk[0]=="@"?nk:"@"+nk;u.name=nm;u.fld=fl;u.reg=true;u.rnVal="";u.rmVal="";u.rfVal="";render()}
+function act(){const u=U[cur],m=$("ac").value.trim().match(/^(\S+)$/i),k=m?codes.findIndex(x=>x.c==m[1].toUpperCase()):-1;
+ if(k<0){u.err="Неверная команда или код уже использован.";return render()}
+ u.inv=codes[k].o;codes.splice(k,1);u.err="";u.codeOk=true;render()}
+function wdStage1(u){
+ return `<div class="c"><b>Вывод средств</b>
+ <div style="font-weight:600;margin-top:6px;margin-bottom:2px">Ваш статус</div>
+ <select id="wdstat" onchange="wdSetStat(this.value)">
+ <option value="" ${!u.wdStatus?"selected":""} disabled>Выберите...</option>
+ ${PAYSTAT.map(s=>`<option ${s==u.wdStatus?"selected":""}>${s}</option>`).join("")}
+ </select>
+ <div style="font-weight:600;margin-top:6px;margin-bottom:2px">Способ получения</div>
+ ${!u.wdStatus?`<select disabled><option>Сначала выберите статус</option></select>`:
+ u.wdStatus=="ИП"?`<select disabled><option selected>${PAYSYS_IP}</option></select>`:
+ `<select id="wdsys" onchange="wdSetSys(this.value)">
+ <option value="" ${!u.wdSystem?"selected":""} disabled>Выберите...</option>
+ ${PAYSYS_OTHER.map(s=>`<option ${s==u.wdSystem?"selected":""}>${s}</option>`).join("")}
+ </select>`}
+ <div class="r" style="margin-top:16px"><button class="p" ${(u.wdStatus&&u.wdSystem)?"":"disabled"} onclick="wdContinue()">Продолжить</button><button onclick="U['${u.id}'].wdForm=false;U['${u.id}'].wdStatus='';U['${u.id}'].wdSystem='';render()">Отмена</button></div>
+ ${u.inv&&u.inv!="admin"?`<button style="width:100%;margin-top:10px" onclick="askPartner()">💬 Обратиться к партнеру</button>`:""}
+ </div>`}
+function wdStage2(u){
+ const fields=wdFieldDefs(u);
+ return `<div class="c" style="position:relative"><button onclick="U['${u.id}'].wdReqForm=false;render()" style="position:absolute;top:8px;right:8px;width:28px;height:28px;padding:0;border-radius:50%;line-height:1" aria-label="Закрыть">✕</button>
+ <b>Реквизиты для вывода</b>
+ ${fields.map(([k,label])=>`<div style="font-weight:600;margin-top:12px;margin-bottom:2px">${label}${k=="card"?" (16 цифр)":""}</div><input id="wf_${k}" ${k=="card"?'inputmode="numeric" placeholder="XXXX XXXX XXXX XXXX"':""} value="${esc(u.wdFields[k]||"")}" oninput="${k=="card"?`fmtCard(this);U['${u.id}'].wdFields['card']=this.value.replace(/\\s/g,'')`:`U['${u.id}'].wdFields['${k}']=this.value`};wdUpdateBtn()">`).join("")}
+ <div style="font-weight:600;margin-top:12px;margin-bottom:2px">Сумма к выводу, ₽ (доступно ${rub(u.bal)})</div>
+ <input id="wf_sum" inputmode="numeric" placeholder="Сумма" value="${u.wdSum?(+u.wdSum).toLocaleString("ru-RU"):""}" oninput="fmtThousands(this);U['${u.id}'].wdSum=this.value.replace(/\\D/g,'');wdUpdateBtn()">
+ <button id="wdSubmitBtn" class="p" style="width:100%;margin-top:16px" ${wdFilled(u)?"":"disabled"} onclick="wdSubmit()">Отправить</button>
+ </div>`}
+function wdMyRequests(u){
+ const mine=wd.filter(x=>x.o==u.id);
+ const tag=x=>x.status=="pending"?'<span class="tag st-yellow">В обработке</span>':x.status=="approved"?'<span class="tag st-green">Одобрено</span>':'<span class="tag st-red">Отклонено</span>';
+ const rows=mine.map(x=>`<div class="c">${rub(x.s)}<div style="margin-top:4px">${tag(x)}</div>${x.comment?`<div class="mu" style="margin-top:4px">Комментарий: ${esc(x.comment)}</div>`:""}</div>`).join("")||'<div class="mu">Заявок на вывод пока нет.</div>';
+ return `<div class="c" style="position:relative"><button onclick="U['${u.id}'].wdListOpen=false;render()" style="position:absolute;top:8px;right:8px;width:28px;height:28px;padding:0;border-radius:50%;line-height:1" aria-label="Закрыть">✕</button><b>Заявки на вывод</b></div>${rows}`}
+function prof(u){
+ if(!u.on)return `<div class="c"><b>Активируйте профиль</b><p class="mu">Перейдите в «Чаты» и отправьте код приглашения.</p><button class="p" onclick="tab('Чаты')">Перейти в чат</button></div>`;
+ if(u.wdListOpen)return wdMyRequests(u);
+ const hasWd=wd.some(x=>x.o==u.id);
+ const topBlock=`<div class="c">
+ <div style="font-weight:600;margin-bottom:${hasWd?"0":"8"}px">${esc(u.nick)}</div>
+ ${hasWd?`<div style="text-align:right;margin:0"><button style="padding:3px 9px;font-size:12px" onclick="U['${u.id}'].wdListOpen=true;render()">Заявки на вывод</button></div>`:""}
+ <div class="r" style="justify-content:space-between;align-items:center;margin-top:${hasWd?"2":"0"}px">
+ <div><div class="mu">Баланс</div><div class="ok" style="font-size:24px">${rub(u.bal)}</div></div>
+ <button onclick="U['${u.id}'].wdForm=!U['${u.id}'].wdForm;render()">Вывести средства</button>
+ </div></div>`;
+ const wdBlock=u.wdForm?(u.wdReqForm?wdStage2(u):wdStage1(u)):"";
+ return `${topBlock}
+ ${wdBlock}
+ <div class="c"><b>Мои лимиты</b><table><tr><th>Стоимость объекта</th><th>Вознаграждение</th><th>Ваш лимит</th></tr>${TIERS.map((t,i)=>`<tr><td style="white-space:nowrap;font-size:12px">${tierLabel(i)}</td><td style="white-space:nowrap;font-size:12px">${t.base==t.cap?t.base.toLocaleString("ru-RU")+" фикс":t.base.toLocaleString("ru-RU")+"–"+t.cap.toLocaleString("ru-RU")}</td><td>${rub(u.lim[i])}${u.lim[i]>t.base?' <span style="color:#16a34a;font-weight:700">↑</span>':""}${u.lim[i]>=t.cap?" 🏆":""}</td></tr>`).join("")}</table>
+ <button style="width:100%;margin-top:10px" onclick="U['${u.id}'].limInfo=!U['${u.id}'].limInfo;render()">${u.limInfo?"Скрыть":"ℹ️ Подробнее о вознаграждении"}</button>
+ ${u.limInfo?`<div style="margin-top:8px">${FAQ_REWARD}</div>`:""}</div>
+`}
+function chat(u){
+ const contacts=contactsOf(u);
+ const showSupportChip=hasDm(u.id,"admin");
+ const bdg=n=>n>0?` <span class="badge">${n}</span>`:"";
+ const switcher=`<div class="r" style="flex-wrap:wrap;margin-bottom:8px">
+ <button class="${(!u.activeChat||u.activeChat=="self")?"p":""}" onclick="U['${u.id}'].activeChat='self';render()">Мой чат${bdg(unreadSelf(u))}</button>
+ ${showSupportChip?`<button class="${u.activeChat=="admin"?"p":""}" onclick="U['${u.id}'].activeChat='admin';render()">🆘 Поддержка${bdg(unreadWith(u,"admin"))}</button>`:""}
+ ${contacts.map(id=>`<button class="${u.activeChat==id?"p":""}" onclick="U['${u.id}'].activeChat='${id}';render()">${U[id].nick}${bdg(unreadWith(u,id))}</button>`).join("")}
+ </div>`;
+ const extra=`<div class="r" style="margin-top:8px">
+ <button style="flex:1" class="${u.activeChat=="admin"?"p":""}" onclick="U['${u.id}'].activeChat='admin';render()">🆘 Поддержка${bdg(unreadWith(u,"admin"))}</button>
+ <button style="flex:1" class="${u.activeChat=="faq"?"p":""}" onclick="U['${u.id}'].activeChat='faq';render()">❓ Частые вопросы</button>
+ </div>`;
+ if(u.activeChat=="faq"){
+  return switcher+`<div class="faqtabs">
+ <button class="${(u.faqTab||"reward")=="reward"?"p":""}" onclick="U['${u.id}'].faqTab='reward';render()">Вознаграждение</button>
+ <button class="${u.faqTab=="partners"?"p":""}" onclick="U['${u.id}'].faqTab='partners';render()">Партнеры</button>
+ </div>
+ <div id="cl" style="max-height:300px;overflow-y:auto">${u.faqTab=="partners"?FAQ_PARTNER:FAQ_REWARD}</div>`+extra;
+ }
+ if(u.activeChat&&u.activeChat!="self"){
+  const other=U[u.activeChat];
+  const isSupport=other.id=="admin";
+  const emptyTxt=isSupport?"Сообщений пока нет. Напишите в поддержку.":`Сообщений пока нет. Напишите ${esc(other.nick)}.`;
+  const placeholderTxt=isSupport?"Сообщение в поддержку":`Сообщение: ${esc(other.nick)}`;
+  const msgs=dm.filter(x=>(x.a==u.id&&x.b==other.id)||(x.a==other.id&&x.b==u.id)).sort((a,b)=>a.ts-b.ts);
+  return switcher+`<div id="cl" style="max-height:300px;overflow-y:auto">${msgs.map(x=>`<div class="b ${x.from==u.id?"me":""}">${esc(x.text)}</div>`).join("")||`<div class="mu">${emptyTxt}</div>`}</div>
+ <div class="r" style="margin-top:6px"><input id="dmin" placeholder="${placeholderTxt}" onkeydown="if(event.key=='Enter')sendDm()"><button class="p" onclick="sendDm()">➤</button></div>`+extra;
+ }
+ const m=u.msgs.map((x,i)=>`<div class="b ${x.me?"me":""}">${esc(x.t)}${x.b?`<button class="p" style="display:block;margin-top:12px" onclick="ackAny(${i})">Ознакомился</button>`:""}${x.lead&&u.on?`<button class="p" style="display:block;margin-top:12px" onclick="U['${u.id}'].form=true;U['${u.id}'].tab='Заявки';render()">Создать заявку</button>`:""}</div>`).join("");
+ return switcher+`<div id="cl" style="max-height:300px;overflow-y:auto">${m||'<div class="mu">Чат пуст. Отправьте код приглашения.</div>'}</div>
+ <div class="r" style="margin-top:6px"><input id="in" placeholder="${u.on?"Сообщение":"XXXX-XXXX"}" onkeydown="if(event.key=='Enter')send()"><button class="p" onclick="send()">➤</button></div>`+extra}
+function leadDetail(u,l){
+ const mi=MAIN.indexOf(l.st),unlocked=mi>=4;
+ const t=l.price?tier(l.price):0;
+ const rangeTxt=t==0?("до "+TIERS[0].max.toLocaleString("ru-RU")):(TIERS[t-1].max.toLocaleString("ru-RU")+" - "+TIERS[t].max.toLocaleString("ru-RU"));
+ const dealsInRange=leads.filter(x=>x.o==u.id&&x.paid&&tier(x.price)==t).length;
+ const rewardTxt=l.paid?rub(l.rw):(l.price?rub(U[u.id].lim[t]):"—");
+ return `<button onclick="U['${u.id}'].leadView=null;render()">← Назад к заявкам</button>
+ <div class="c">
+ <div style="font-weight:600">${esc(l.fio)}</div>
+ <div>${esc(l.ph)}</div>
+ <div>${l.sv}</div>
+ <div style="margin-top:6px"><span class="tag ${stColor(l.st)}">${l.st}</span></div>
+ </div>
+ <div class="c"><b>Информация по объекту</b>
+ <div class="lcard" style="margin-top:6px">
+ <div class="lrow"><span>Комнатность</span><span>${unlocked&&l.rooms?esc(l.rooms):"—"}</span></div>
+ <div class="lrow"><span>Район</span><span>${unlocked&&l.district?esc(l.district):"—"}</span></div>
+ <div class="lrow"><span>Год постройки</span><span>${unlocked&&l.year?esc(l.year):"—"}</span></div>
+ <div class="lrow"><span>Ремонт</span><span>${unlocked&&l.renovation?esc(l.renovation):"—"}</span></div>
+ <div class="lrow"><span>Цена текущая</span><span>${unlocked&&l.priceCurrent?rub(l.priceCurrent):"—"}</span></div>
+ <div class="lrow"><span>Цена продажи</span><span>${unlocked&&l.price?rub(l.price):"—"}</span></div>
+ </div></div>
+ <div class="c"><b>Ваш ценовой диапазон</b>
+ <div class="lcard" style="margin-top:6px">
+ <div class="lrow"><span>Диапазон</span><span>${unlocked&&l.price?rangeTxt:"—"}</span></div>
+ <div class="lrow"><span>Сделок в диапазоне</span><span>${unlocked&&l.price?dealsInRange:"—"}</span></div>
+ <div class="lrow"><span>Вознаграждение</span><span class="ok">${unlocked?rewardTxt:"—"}</span></div>
+ </div></div>
+ ${!unlocked?`<div class="mu">Полная информация появится, когда заявка будет принята в работу.</div>`:""}`}
+function req(u){
+ if(u.leadView){
+  const l=leads.find(x=>x.id==u.leadView&&x.o==u.id);
+  if(l)return leadDetail(u,l);
+  u.leadView=null;
+ }
+ const f=u.form?`<div class="c" style="position:relative"><button onclick="U['${u.id}'].form=false;render()" style="position:absolute;top:8px;right:8px;width:28px;height:28px;padding:0;border-radius:50%;line-height:1" aria-label="Закрыть">✕</button><b>Новая заявка</b>
+ <input id="f" style="margin-top:14px" placeholder="ФИО" value="${esc(u.lf||"")}" class="${u.errFio?"err-field":""}" oninput="U['${u.id}'].lf=this.value" onblur="this.value=cap(this.value);U['${u.id}'].lf=this.value"><div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errFio||"")}</div>
+ <input id="p" placeholder="+7(999)999-99-99" value="${esc(u.lp||"")}" class="${u.errPhone?"err-field":""}" oninput="fmtPhone(this);U['${u.id}'].lp=this.value" onkeydown="phoneKeyDown(event,this,'${u.id}')" onfocus="if(!this.value)this.value='+7'"><div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errPhone||"")}</div>
+ <div style="font-weight:600;margin-top:6px;margin-bottom:2px;display:flex;align-items:center;gap:6px">Выберите услугу<button type="button" class="qbtn" onclick="U['${u.id}'].svInfo=true;render()" aria-label="Описание услуг">?</button></div><select id="s" onchange="U['${u.id}'].ls=this.value">${SV.map(s=>`<option ${s==(u.ls||SV[0])?"selected":""}>${s}</option>`).join("")}</select>
+ <div style="font-weight:600;margin-top:6px;margin-bottom:2px">Комментарий</div><textarea id="cm" rows=2 placeholder="Почему клиент заинтересован?" class="${u.errComment?"err-field":""}" oninput="U['${u.id}'].lcm=this.value" onblur="this.value=cap(this.value);U['${u.id}'].lcm=this.value">${esc(u.lcm||"")}</textarea><div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errComment||"")}</div>
+ <div class="mu" style="margin-top:6px">Первый контакт:</div>
+ <label class="mu" style="margin-right:14px"><input type="radio" name="w" value="call" ${u.lw=="call"?"checked":""} onchange="U['${u.id}'].lw=this.value" style="width:auto"> Позвонить клиенту.</label>
+ <label class="mu"><input type="radio" name="w" value="self" ${u.lw=="self"?"checked":""} onchange="U['${u.id}'].lw=this.value" style="width:auto"> Клиент сам позвонит.</label>
+ <div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errContact||"")}</div>
+ <div class="r" style="margin-top:16px"><button class="p" onclick="addLead()">Отправить</button><button onclick="U['${u.id}'].form=false;render()">Отмена</button></div></div>`:`<button class="p" style="width:100%;margin-bottom:8px" onclick="U['${u.id}'].form=true;render()">➕ Создать заявку</button>`;
+ const r=leads.filter(l=>l.o==u.id).map(l=>{
+ const mi=MAIN.indexOf(l.st),unlocked=mi>=4;
+ return `<div class="c lcard">
+ <div class="lrow"><span>ФИО</span><span><b>${esc(l.fio)}</b></span></div>
+ <div style="margin-top:6px"><span class="tag ${stColor(l.st)}">${l.st}</span></div>
+ <div class="lrow" style="margin-top:6px"><span>Способ продажи</span><span>${l.sv}</span></div>
+ ${l.priceCurrent?`<div class="lrow"><span>Цена текущая</span><span>${rub(l.priceCurrent)}</span></div>`:""}
+ ${l.paid?`<div class="lrow"><span>Цена продажи</span><span>${rub(l.price)}</span></div><div class="lrow"><span>Вознаграждение</span><span class="ok">${rub(l.rw)}</span></div>`:""}
+ ${l.note?`<div class="lrow"><span>Комментарий</span><span>${esc(l.note)}</span></div>`:""}
+ <button style="width:100%;margin-top:8px" ${unlocked?"":"disabled"} onclick="U['${u.id}'].leadView=${l.id};render()">Перейти в заявку</button>
+ ${!unlocked?'<div class="mu" style="margin-top:4px;text-align:center">Доступно после статуса «Принят в работу»</div>':""}
+ </div>`}).join("");
+ return f+(r||'<div class="mu">Заявок пока нет.</div>')}
+function prt(u){
+ if(u.viewPartner&&U[u.viewPartner]&&U[u.viewPartner].inv==u.id){
+  const p=U[u.viewPartner];
+  const ls=leads.filter(l=>l.o==p.id).map(l=>`<div class="c lcard">
+ <div class="lrow"><span>Статус</span><span><span class="tag ${stColor(l.st)}">${l.st}</span></span></div>
+ <div class="lrow"><span>Способ продажи</span><span>${l.sv}</span></div>
+ ${l.note?`<div class="lrow"><span>Комментарий</span><span>${esc(l.note)}</span></div>`:""}
+ </div>`).join("")||'<div class="mu">Заявок пока нет.</div>';
+  return `<button onclick="U['${u.id}'].viewPartner=null;render()">← Назад к партнерам</button>
+ <div class="c"><div class="r" style="justify-content:space-between;align-items:center">
+ <div><div style="font-weight:600">${p.nick}</div><div class="mu">${esc(p.name)||"—"}</div></div>
+ <button onclick="U['${u.id}'].activeChat='${p.id}';U['${u.id}'].tab='Чаты';render()">Написать</button>
+ </div></div>${ls}`;
+ }
+ const my=codes.filter(c=>c.o==u.id);
+ const ps=Object.values(U).filter(x=>x.inv==u.id);
+ const rows=ps.map(p=>{const ls=leads.filter(l=>l.o==p.id),d=ls.filter(l=>l.paid).length,b=L.filter(x=>x.to==u.id&&x.from==p.id).reduce((a,x)=>a+x.sum,0),last=ls.length?Math.max(...ls.map(l=>l.ts||0)):0;
+ return `<tr style="cursor:pointer" onclick="U['${u.id}'].viewPartner='${p.id}';render()"><td>${p.nick}${p.on?"":" ⏳"}</td><td>${ls.length}</td><td>${d}</td><td>${rub(b)}</td><td class="mu">${fmtAgo(last)}</td></tr>`}).join("");
+ return `<div class="c"><b>Пригласить партнера</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${my.map(c=>`<span class="cc"><span>${c.c}</span><button onclick="cp('${c.c}',this)">Копировать</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div></div>
+ <div class="c"><b>Мои партнеры</b><p class="mu">Вы получаете 10% с вознаграждения каждого приглашенного партнера, <u>его выплата не уменьшается</u>. Нажмите на партнера, чтобы увидеть статусы его заявок.</p>
+ <table><tr><th>Ник</th><th>Заявки</th><th>Сделки</th><th>Ваш бонус</th><th>Активность</th></tr>${rows||'<tr><td colspan=5 class="mu">Пока никого. Создайте код в профиле.</td></tr>'}</table></div>`}
+function adminSupportChat(){
+ const a=U.admin,partners=Object.values(U).filter(x=>x.id!="admin"&&hasDm(x.id,"admin"));
+ const bdg=n=>n>0?` <span class="badge">${n}</span>`:"";
+ const list=`<div class="r" style="flex-wrap:wrap;margin:8px 0">
+ ${partners.map(p=>`<button class="${a.activeChat==p.id?"p":""}" onclick="U.admin.activeChat='${p.id}';render()">${p.nick}${bdg(unreadWith(a,p.id))}</button>`).join("")||'<span class="mu">Нет обращений в поддержку</span>'}
+ </div>`;
+ if(!a.activeChat||!U[a.activeChat]||a.activeChat=="admin")return `<div class="c"><b>Поддержка</b>${list}</div>`;
+ const other=U[a.activeChat];
+ const msgs=dm.filter(x=>(x.a=="admin"&&x.b==other.id)||(x.a==other.id&&x.b=="admin")).sort((x,y)=>x.ts-y.ts);
+ return `<div class="c"><b>Поддержка</b>${list}
+ <div id="cl" style="max-height:220px;overflow-y:auto">${msgs.map(x=>`<div class="b ${x.from=="admin"?"me":""}">${esc(x.text)}</div>`).join("")||'<div class="mu">Сообщений пока нет.</div>'}</div>
+ <div class="r" style="margin-top:6px"><input id="dmin" placeholder="Сообщение: ${esc(other.nick)}" onkeydown="if(event.key=='Enter')sendDm()"><button class="p" onclick="sendDm()">➤</button></div></div>`}
+function adminPairChats(){
+ const a=U.admin,keys=[...new Set(dm.filter(x=>x.a!="admin"&&x.b!="admin").map(x=>[x.a,x.b].sort().join("|")))];
+ const list=`<div class="r" style="flex-wrap:wrap;margin:8px 0">
+ ${keys.map(k=>{const[x,y]=k.split("|");return `<button class="${a.pairChat==k?"p":""}" onclick="U.admin.pairChat='${k}';render()">${U[x].nick} ↔ ${U[y].nick}</button>`}).join("")||'<span class="mu">Партнеры пока не писали друг другу</span>'}
+ </div>`;
+ if(!a.pairChat)return `<div class="c"><b>Переписка партнеров</b>${list}</div>`;
+ const[x,y]=a.pairChat.split("|");
+ const msgs=dm.filter(m=>(m.a==x&&m.b==y)||(m.a==y&&m.b==x)).sort((p,q)=>p.ts-q.ts);
+ return `<div class="c"><b>Переписка партнеров</b>${list}
+ <div style="max-height:260px;overflow-y:auto">${msgs.map(m=>`<div class="b ${m.from==x?"":"me"}"><span class="mu">${U[m.from].nick}:</span> ${esc(m.text)}</div>`).join("")||'<div class="mu">Сообщений нет.</div>'}</div></div>`}
+function admChatsView(){
+ const a=U.admin,sn=totalUnread(a);
+ const sub=`<div class="r" style="margin-bottom:4px">
+ <button style="flex:1" class="${(a.chatSub||"support")=="support"?"p":""}" onclick="U.admin.chatSub='support';render()">🆘 Поддержка${sn>0?` <span class="badge">${sn}</span>`:""}</button>
+ <button style="flex:1" class="${a.chatSub=="pairs"?"p":""}" onclick="U.admin.chatSub='pairs';render()">👥 Между партнерами</button>
+ </div>`;
+ return sub+(a.chatSub=="pairs"?adminPairChats():adminSupportChat())}
+function admPartnersView(){
+ if(U.admin.viewPartner&&U[U.admin.viewPartner]){
+  const p=U[U.admin.viewPartner];
+  const ls=leads.filter(l=>l.o==p.id).map(l=>`<div class="c lcard">
+ <div class="lrow"><span>ФИО</span><span><b>${esc(l.fio)}</b></span></div>
+ <div class="lrow"><span>Статус</span><span><span class="tag ${stColor(l.st)}">${l.st}</span></span></div>
+ <div class="lrow"><span>Способ продажи</span><span>${l.sv}</span></div>
+ ${l.paid?`<div class="lrow"><span>Цена продажи</span><span>${rub(l.price)}</span></div><div class="lrow"><span>Вознаграждение</span><span class="ok">${rub(l.rw)}</span></div>`:""}
+ ${l.note?`<div class="lrow"><span>Комментарий</span><span>${esc(l.note)}</span></div>`:""}
+ </div>`).join("")||'<div class="mu">Заявок пока нет.</div>';
+  return `<button onclick="U.admin.viewPartner=null;render()">← Назад к партнерам</button>
+ <div class="c"><b>${p.nick}</b><div class="mu">${esc(p.name)||"—"} · ${esc(p.fld)||"—"}</div></div>${ls}`;
+ }
+ const list=Object.values(U).filter(x=>x.id!="admin"&&x.reg).map(p=>{
+  const inv=p.inv?(p.inv=="admin"?"администратора":U[p.inv].nick):"—";
+  const ls=leads.filter(l=>l.o==p.id),deals=ls.filter(l=>l.paid),profit=deals.reduce((a,l)=>a+(l.rw||0),0),refs=Object.values(U).filter(x=>x.inv==p.id).length,last=ls.length?Math.max(...ls.map(l=>l.ts||0)):0;
+  return `<div class="c" style="cursor:pointer" onclick="U.admin.viewPartner='${p.id}';render()">
+ <div style="font-weight:600">${p.nick}${p.on?"":" ⏳"}</div>
+ <div class="mu">${esc(p.name)||"—"} · ${esc(p.fld)||"—"} · от ${inv}</div>
+ <table style="margin-top:8px"><tr><th>Заявки</th><th>Сделки</th><th>Прибыль</th><th>Реферал</th><th>Активность</th></tr>
+ <tr><td>${ls.length}</td><td>${deals.length}</td><td>${rub(profit)}</td><td>${refs}</td><td class="mu">${fmtAgo(last)}</td></tr></table></div>`}).join("")||'<div class="mu">Нет зарегистрированных партнеров</div>';
+ return `<div class="c"><b>Коды администратора</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${codes.filter(c=>c.o=="admin").map(c=>`<span class="cc"><span>${c.c}</span><button onclick="cp('${c.c}',this)">Копировать</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div></div>${list}`}
+function toggleLead(i){leads[i]._expanded=!leads[i]._expanded;render()}
+function admLeadsView(){
+ const l=leads.map((x,i)=>{const o=U[x.o],ref=o.inv&&o.inv!="admin"?U[o.inv]:null;
+ const priceVal=x.priceCurrent?(+x.priceCurrent).toLocaleString("ru-RU"):"";
+ const renoOpts=["","есть","нет","требуется"];
+ const head=`<b>#${x.id} ${esc(x.fio)}</b> ${esc(x.ph)}<div class="mu">${x.sv} · от ${o.nick}${ref?` (${ref.nick})`:""}</div>`;
+ if(!x._expanded){
+  return `<div class="c">${head}
+ <div style="margin-top:6px"><span class="tag ${stColor(x.st)}">${x.st}</span></div>
+ ${x.priceCurrent?`<div class="mu" style="margin-top:4px">Цена текущая: ${rub(x.priceCurrent)}</div>`:""}
+ ${x.paid?`<div class="mu" style="margin-top:2px">Цена продажи: ${rub(x.price)}</div>`:""}
+ <button style="width:100%;margin-top:10px" onclick="toggleLead(${i})">Перейти в заявку</button>
+ </div>`;
+ }
+ return `<div class="c">${head}
+ <button style="margin-top:6px" onclick="toggleLead(${i})">Свернуть</button>
+ <select id="st${i}" style="margin-top:10px">${[...MAIN,...PAUSE].map(s=>`<option ${s==x.st?"selected":""}>${s}</option>`).join("")}</select>
+ <input id="pr${i}" type="text" inputmode="numeric" placeholder="Текущая цена, ₽" value="${priceVal}" oninput="fmtThousands(this)">
+ ${x.paid?`<div class="mu" style="margin-top:2px">Цена продажи (зафиксирована): ${rub(x.price)}</div>`:""}
+ <input id="nt${i}" placeholder="Комментарий партнеру" value="${esc(x.note)}" onblur="this.value=cap(this.value)">
+ <div style="font-weight:600;margin-top:10px;margin-bottom:2px">Информация по объекту</div>
+ <div class="r"><input id="rm${i}" placeholder="Комнатность (2к)" value="${esc(x.rooms||"")}"><input id="ds${i}" placeholder="Район" value="${esc(x.district||"")}"></div>
+ <div class="r"><input id="yr${i}" placeholder="Год постройки" value="${esc(x.year||"")}"><select id="rv${i}">${renoOpts.map(r=>`<option value="${r}" ${r==(x.renovation||"")?"selected":""}>${r||"Ремонт: не указан"}</option>`).join("")}</select></div>
+ <div class="r" style="align-items:center;margin-top:12px"><button class="p" onclick="upd(${i})">Применить</button>${x._applied?'<span class="ok">Отправлено ✓</span>':""}</div>
+ ${x.paid?(x.credited?`<div class="mu" style="margin-top:6px"><span class="ok">Начислено на баланс: ${rub(x.rw)}</span></div>`:`<div class="r" style="margin-top:8px;align-items:center"><span class="mu">Вознаграждение ${rub(x.rw)} не начислено</span><button onclick="creditReward(${i})">Начислить на баланс</button></div>`):""}
+ </div>`}).join("")||'<div class="mu">Заявок нет</div>';
+ return `<div class="mu" style="color:#c0392b">${esc(U.admin.err||"")}</div>${l}`}
+function admWdView(){
+ const FLABEL={inn:"ИНН",kpp:"КПП",rname:"Наименование получателя",rs:"Расчетный счет (р/с)",bank:"Банк получателя",bik:"БИК",ks:"Корр. счет",fio:"ФИО получателя",card:"Номер карты",wallet:"Номер кошелька ЮMoney"};
+ const tag=x=>x.status=="pending"?'<span class="tag st-yellow">В обработке</span>':x.status=="approved"?'<span class="tag st-green">Одобрено</span>':'<span class="tag st-red">Отклонено</span>';
+ const w=wd.map((x,i)=>{
+  const o=U[x.o];
+  const inv=o.inv?(o.inv=="admin"?"администратора":U[o.inv].nick):"—";
+  const details=x._open?`<div style="margin-top:8px">
+ <div class="mu">${esc(x.sys||"—")}, ${esc(x.stat||"—")}</div>
+ <div class="lcard" style="margin-top:6px">${Object.entries(x.fields||{}).map(([k,v])=>`<div class="lrow"><span>${FLABEL[k]||k}</span><span>${k=="card"?esc(v).replace(/(.{4})/g,"$1 ").trim():esc(v)}</span></div>`).join("")}</div>
+ ${x.status=="pending"?`<div style="font-weight:600;margin-top:10px;margin-bottom:2px">Комментарий партнеру</div><input id="wdc${i}" value="${esc(x.comment||"")}" onclick="event.stopPropagation()">
+ <div class="r" style="margin-top:8px"><button class="p" onclick="event.stopPropagation();wdDecide(${i},'approved')">Одобрить</button><button onclick="event.stopPropagation();wdDecide(${i},'rejected')">Отклонить</button></div>`:
+ `<div class="mu" style="margin-top:6px">${x.comment?"Комментарий: "+esc(x.comment):"Без комментария"}</div>`}
+ </div>`:"";
+  return `<div class="c" style="cursor:pointer" onclick="wdSetOpen(${i})">
+ <div style="font-weight:600">${o.nick}${o.on?"":" ⏳"} <span class="mu">· ${rub(x.s)}</span></div>
+ <div class="mu">${esc(o.name)||"—"} · ${esc(o.fld)||"—"} · от ${inv}</div>
+ <div style="margin-top:4px">${tag(x)}</div>
+ ${details}
+ </div>`}).join("")||'<div class="mu">Нет запросов</div>';
+ return w}
+render();
+</script></body></html>

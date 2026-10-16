@@ -71,6 +71,9 @@ input[type=number]{-moz-appearance:textfield}
 <div class="row"><button onclick="doLock()">📴 Свернуть (партнер свернул приложение/заблокировал телефон)</button></div></div>
 <div class="frame"><div class="hd" id="hd"></div><div class="body" id="bd"></div><div class="nav" id="nv"></div><div id="modal"></div></div>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-app-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-auth-compat.js"></script>
 <script>
 const TG=window.Telegram&&window.Telegram.WebApp;try{TG&&(TG.ready(),TG.expand())}catch(e){}
 // --- Видимость демо-панели: скрыта для ВСЕХ внутри Telegram (без исключений), видна только в обычном браузере/артефакте ---
@@ -90,6 +93,19 @@ function getTgUser(){
 }
 const TG_USER=getTgUser();
 const IS_ADMIN_TG_ACCOUNT=!!(TG_USER&&TG_USER.username&&TG_USER.username.toLowerCase()===ADMIN_TG_USERNAME.toLowerCase());
+// --- Привязка каждого реального партнера в Telegram к его собственному стабильному ID (чтобы разные партнеры не "слипались" в одного демо-пользователя p2) ---
+const REAL_USER_ID=(IS_IN_TELEGRAM&&TG_USER&&TG_USER.id)?(IS_ADMIN_TG_ACCOUNT?"admin":("tg"+TG_USER.id)):null;
+// --- Общая база данных (Firebase Realtime Database): синхронизация заявок, кодов, балансов, выводов и переписки между устройствами ---
+const FIREBASE_CONFIG={apiKey:"AIzaSyAUlnUisb0Kp0LVKcwsjCR0xOELIKSKKmU",authDomain:"partner-miniapp.firebaseapp.com",databaseURL:"https://partner-miniapp-default-rtdb.europe-west1.firebasedatabase.app",projectId:"partner-miniapp",storageBucket:"partner-miniapp.firebasestorage.app",messagingSenderId:"456368165048",appId:"1:456368165048:web:2debc5c039b334fe8da44d"};
+const SYNC_PATH="state";
+let DB=null,_applyingRemote=false,_syncTimer=null,_firstSyncApplied=false;
+try{
+ if(typeof firebase!=="undefined"){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  DB=firebase.database();
+  if(firebase.auth)firebase.auth().signInAnonymously().catch(()=>{});
+ }
+}catch(e){DB=null}
 const TIERS=[{n:"до 10 млн",max:1e7,base:3e4,cap:3e4},{n:"10–20 млн",max:2e7,base:5e4,cap:1e5},{n:"20–30 млн",max:3e7,base:1e5,cap:2e5},{n:"30–40 млн",max:4e7,base:2e5,cap:3e5},{n:"40–50 млн",max:5e7,base:3e5,cap:4e5}];
 const SV=["Затрудняюсь ответить","Классическая продажа","Быстрая продажа","Срочный выкуп","Подбор вторички","Подбор новостроек","Подбор зарубежной недвижимости"];
 const SERVICES_INFO=[
@@ -154,7 +170,57 @@ const FAQ_PARTNER=`<div class="c"><b>Партнерское вознагражд
 </div>`;
 let U={admin:{id:"admin",nick:"@admin",activeChat:null,pairChat:null,chatSub:"support",tab:"Чаты",viewPartner:null,lastSeen:{}},p1:mk("p1","@alexey",true,"admin")},codes=[{c:"START-0001",o:"admin"}],leads=[],wd=[],L=[],dm=[],cur="p2",n=2;
 U.p2=mk("p2","",false,null);U.p1.msgs.push({t:ONB,b:1,ts:Date.now()});
-if(IS_ADMIN_TG_ACCOUNT)cur="admin"; // авто-вход в админ-панель для @vadimivanovich01 внутри Telegram
+if(REAL_USER_ID){
+ // авто-вход: админ -> админ-панель; реальный партнер в Telegram -> его собственный аккаунт по стабильному tg-id (не p2!)
+ if(REAL_USER_ID!=="admin"&&!U[REAL_USER_ID])U[REAL_USER_ID]=mk(REAL_USER_ID,"",false,null);
+ cur=REAL_USER_ID;
+}
+function snapshotForSync(){
+ const users={};
+ Object.keys(U).forEach(id=>{
+  if(id==="admin")return;
+  const u=U[id];
+  users[id]={reg:u.reg,nick:u.nick,name:u.name,fld:u.fld,on:u.on,codeOk:u.codeOk,inv:u.inv,pin:u.pin,bal:u.bal,lim:u.lim,msgs:u.msgs};
+ });
+ return {leads,wd,L,dm,codes,users};
+}
+function applyRemoteSnapshot(data){
+ if(!data)return;
+ leads=Array.isArray(data.leads)?data.leads:leads;
+ wd=Array.isArray(data.wd)?data.wd:wd;
+ L=Array.isArray(data.L)?data.L:L;
+ dm=Array.isArray(data.dm)?data.dm:dm;
+ codes=Array.isArray(data.codes)?data.codes:codes;
+ const ru=data.users||{};
+ Object.keys(ru).forEach(id=>{
+  if(id==="admin")return;
+  if(!U[id])U[id]=mk(id,"",false,null);
+  Object.assign(U[id],ru[id]);
+ });
+}
+function scheduleSync(){
+ if(!DB)return;
+ clearTimeout(_syncTimer);
+ _syncTimer=setTimeout(()=>{try{DB.ref(SYNC_PATH).set(snapshotForSync())}catch(e){}},400);
+}
+if(DB){
+ try{
+  DB.ref(SYNC_PATH).on("value",snap=>{
+   _applyingRemote=true;
+   try{
+    applyRemoteSnapshot(snap.val());
+    // --- Автоблокировка при входе: начиная со следующего запуска приложения после регистрации/активации, партнер должен ввести ник+пароль при каждом новом входе. Срабатывает один раз за сессию, в момент первого получения данных из базы — а не при каждом последующем обновлении (иначе экран блокировки появлялся бы при любом чужом изменении данных). ---
+    if(!_firstSyncApplied){
+     _firstSyncApplied=true;
+     const u0=U[cur];
+     if(u0&&u0.id!=="admin"&&u0.on){u0.locked=true;u0.lockStage="nick";u0.lockPinBuf="";u0.lockErr=""}
+    }
+    render();
+   }catch(e){}
+   _applyingRemote=false;
+  });
+ }catch(e){}
+}
 const tier=p=>{const i=TIERS.findIndex(t=>p<t.max);return i<0?4:i};
 const bot=(u,t,b)=>U[u].msgs.push({t,b,ts:Date.now()});
 const unreadSelf=u=>u.msgs.filter(m=>(m.ts||0)>(u.lastSeen.self||0)).length;
@@ -362,7 +428,8 @@ function render(){
  $("bd").innerHTML=u.id=="admin"?({Чаты:admChatsView,Партнеры:admPartnersView,Заявки:admLeadsView,Запросы:admWdView}[u.tab||"Чаты"])():!u.on?gate(u):u.locked?chatLocked(u):({Профиль:prof,Чаты:chat,Заявки:req,Партнеры:prt}[u.tab])(u);
  $("modal").innerHTML=u.svInfo?svInfoModal(u):"";
  const c=$("cl");if(c)c.scrollTop=c.scrollHeight;
- if(u.errFocus){const el=$(u.errFocus);if(el){el.focus();if(el.select)el.select()}u.errFocus=null}}
+ if(u.errFocus){const el=$(u.errFocus);if(el){el.focus();if(el.select)el.select()}u.errFocus=null}
+ if(!_applyingRemote)scheduleSync()}
 function steps(u){const a=["Регистрация","Активация","Обучение","Работа"],k=!u.reg?0:!u.on?1:u.msgs.some(m=>m.b)?2:3;return `<div class="st">${a.map((x,i)=>`<span class="${i==k?"on":i<k?"dn":""}">${i<k?"✓ ":""}${x}</span>`).join("")}</div>`}
 function gate(u){
  if(!u.reg)return steps(u)+`<div class="c reg"><b>Регистрация партнера</b>

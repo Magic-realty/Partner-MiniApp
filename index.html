@@ -70,6 +70,7 @@ input[type=number]{-moz-appearance:textfield}
 <div class="row"><button onclick="newP()">➕ Новый пользователь (старт с регистрации)</button></div>
 <div class="row"><button onclick="doLock()">📴 Свернуть (партнер свернул приложение/заблокировал телефон)</button></div></div>
 <div class="frame"><div class="hd" id="hd"></div><div class="body" id="bd"></div><div class="nav" id="nv"></div><div id="modal"></div></div>
+<div id="fbDebug" style="position:fixed;bottom:4px;left:4px;z-index:9999;background:#000;color:#0f0;font-size:10px;line-height:1.3;padding:3px 6px;border-radius:4px;opacity:.85;max-width:94vw;word-break:break-all">FB: ...</div>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-database-compat.js"></script>
@@ -99,13 +100,17 @@ const REAL_USER_ID=(IS_IN_TELEGRAM&&TG_USER&&TG_USER.id)?(IS_ADMIN_TG_ACCOUNT?"a
 const FIREBASE_CONFIG={apiKey:"AIzaSyAUlnUisb0Kp0LVKcwsjCR0xOELIKSKKmU",authDomain:"partner-miniapp.firebaseapp.com",databaseURL:"https://partner-miniapp-default-rtdb.europe-west1.firebasedatabase.app",projectId:"partner-miniapp",storageBucket:"partner-miniapp.firebasestorage.app",messagingSenderId:"456368165048",appId:"1:456368165048:web:2debc5c039b334fe8da44d"};
 const SYNC_PATH="state";
 let DB=null,_applyingRemote=false,_syncTimer=null,_firstSyncApplied=false;
+function fbDbg(t){try{const d=document.getElementById("fbDebug");if(d)d.textContent="FB: "+t}catch(e){}}
 try{
- if(typeof firebase!=="undefined"){
+ if(typeof firebase==="undefined"){
+  fbDbg("скрипт Firebase не загрузился (typeof firebase === undefined)");
+ }else{
   firebase.initializeApp(FIREBASE_CONFIG);
   DB=firebase.database();
-  if(firebase.auth)firebase.auth().signInAnonymously().catch(()=>{});
+  fbDbg("инициализирован, жду ответа от базы...");
+  if(firebase.auth)firebase.auth().signInAnonymously().catch(e=>fbDbg("ошибка анонимного входа: "+(e&&e.code||e)));
  }
-}catch(e){DB=null}
+}catch(e){DB=null;fbDbg("ошибка инициализации: "+(e&&e.message||e))}
 const TIERS=[{n:"до 10 млн",max:1e7,base:3e4,cap:3e4},{n:"10–20 млн",max:2e7,base:5e4,cap:1e5},{n:"20–30 млн",max:3e7,base:1e5,cap:2e5},{n:"30–40 млн",max:4e7,base:2e5,cap:3e5},{n:"40–50 млн",max:5e7,base:3e5,cap:4e5}];
 const SV=["Затрудняюсь ответить","Классическая продажа","Быстрая продажа","Срочный выкуп","Подбор вторички","Подбор новостроек","Подбор зарубежной недвижимости"];
 const SERVICES_INFO=[
@@ -201,11 +206,18 @@ function applyRemoteSnapshot(data){
 function scheduleSync(){
  if(!DB)return;
  clearTimeout(_syncTimer);
- _syncTimer=setTimeout(()=>{try{DB.ref(SYNC_PATH).set(snapshotForSync())}catch(e){}},400);
+ _syncTimer=setTimeout(()=>{
+  try{
+   DB.ref(SYNC_PATH).set(snapshotForSync())
+    .then(()=>fbDbg("отправлено ✓ ("+new Date().toLocaleTimeString()+")"))
+    .catch(e=>fbDbg("ОШИБКА ОТПРАВКИ: "+(e&&e.code||e&&e.message||e)));
+  }catch(e){fbDbg("ошибка отправки (sync): "+(e&&e.message||e))}
+ },400);
 }
 if(DB){
  try{
   DB.ref(SYNC_PATH).on("value",snap=>{
+   fbDbg("получены данные ✓ ("+new Date().toLocaleTimeString()+")");
    _applyingRemote=true;
    try{
     applyRemoteSnapshot(snap.val());
@@ -218,8 +230,8 @@ if(DB){
     render();
    }catch(e){}
    _applyingRemote=false;
-  });
- }catch(e){}
+  },err=>{fbDbg("ОШИБКА ПОДПИСКИ: "+(err&&err.code||err&&err.message||err))});
+ }catch(e){fbDbg("ошибка подписки (catch): "+(e&&e.message||e))}
 }
 const tier=p=>{const i=TIERS.findIndex(t=>p<t.max);return i<0?4:i};
 const bot=(u,t,b)=>U[u].msgs.push({t,b,ts:Date.now()});

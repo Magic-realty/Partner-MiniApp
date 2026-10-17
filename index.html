@@ -205,6 +205,7 @@ function applyRemoteSnapshot(data){
 }
 function scheduleSync(){
  if(!DB)return;
+ if(!_firstSyncApplied){fbDbg("локальное изменение отложено до получения данных из базы (защита от перезаписи)");return}
  clearTimeout(_syncTimer);
  _syncTimer=setTimeout(()=>{
   try{
@@ -384,7 +385,7 @@ function upd(i){
    bot(l.o,"Ура! Сделка состоялась. Зайдите во вкладку \"Заявки\", чтобы посмотреть подробнее:\n\n"+l.fio+"\n"+l.ph+"\n"+l.sv+"\nКатегория «"+TIERS[t].n+"»\nВаш лимит вырос: "+l._oldLim.toLocaleString("ru-RU")+" → "+newLim.toLocaleString("ru-RU")+".")
   }
  }else if(statusChanged||firstApply){
-  bot(l.o,"Статус заявки изменился: "+l.fio+"\n"+l.ph+"\n"+l.sv+". Статус: "+l.st+".");
+  bot(l.o,"Статус заявки изменился:\n"+l.fio+"\n"+l.ph+"\n"+l.sv+"\nСтатус: "+l.st+".");
  }
  l._lastSt=newSt;
  l._applied=true;setTimeout(()=>{l._applied=false;render()},1500);
@@ -549,7 +550,7 @@ function chat(u){
   return switcher+`<div id="cl" style="max-height:300px;overflow-y:auto">${msgs.map(x=>`<div class="b ${x.from==u.id?"me":""}">${esc(x.text)}</div>`).join("")||`<div class="mu">${emptyTxt}</div>`}</div>
  <div class="r" style="margin-top:6px"><input id="dmin" placeholder="${placeholderTxt}" onkeydown="if(event.key=='Enter')sendDm()"><button class="p" onclick="sendDm()">➤</button></div>`+extra;
  }
- const m=u.msgs.map((x,i)=>`<div class="b ${x.me?"me":""}">${esc(x.t)}${x.b?`<button class="p" style="display:block;margin-top:12px" onclick="ackAny(${i})">Ознакомился</button>`:""}${x.lead&&u.on?`<button class="p" style="display:block;margin-top:12px" onclick="U['${u.id}'].form=true;U['${u.id}'].tab='Заявки';render()">Создать заявку</button>`:""}</div>`).join("");
+ const m=u.msgs.map((x,i)=>`<div class="b ${x.me?"me":""}">${esc(x.t)}${x.b?`<button class="p" style="display:block;margin-top:12px" onclick="ackAny(${i})">Ознакомился</button>`:""}${x.lead?`<button class="p" style="display:block;margin-top:12px" onclick="U['${u.id}'].form=true;U['${u.id}'].tab='Заявки';render()">Создать заявку</button>`:""}</div>`).join("");
  return switcher+`<div id="cl" style="max-height:300px;overflow-y:auto">${m||'<div class="mu">Чат пуст. Отправьте код приглашения.</div>'}</div>
  <div class="r" style="margin-top:6px"><input id="in" placeholder="${u.on?"Сообщение":"XXXX-XXXX"}" onkeydown="if(event.key=='Enter')send()"><button class="p" onclick="send()">➤</button></div>`+extra}
 function leadDetail(u,l){

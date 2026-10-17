@@ -180,12 +180,20 @@ if(REAL_USER_ID){
  if(REAL_USER_ID!=="admin"&&!U[REAL_USER_ID])U[REAL_USER_ID]=mk(REAL_USER_ID,"",false,null);
  cur=REAL_USER_ID;
 }
+function sanitizeMsg(m){
+ // Сохраняем ВСЕ поля сообщения как есть (t, b, ts, lead, done и любые другие, которые появятся в будущем),
+ // заменяя только undefined на null — иначе Firebase целиком отвергает запись, а узкий список полей
+ // (как было раньше) рисковал тихо срезать флаги типа lead, из-за которых пропадают кнопки.
+ const o={};
+ Object.keys(m).forEach(k=>{o[k]=(m[k]===undefined?null:m[k])});
+ return o;
+}
 function snapshotForSync(){
  const users={};
  Object.keys(U).forEach(id=>{
   if(id==="admin")return;
   const u=U[id];
-  users[id]={reg:u.reg,nick:u.nick||"",name:u.name||"",fld:u.fld||"",on:u.on,codeOk:u.codeOk,inv:u.inv||null,pin:u.pin||null,bal:u.bal||0,lim:u.lim||[],msgs:(u.msgs||[]).map(m=>({t:m.t||"",b:(m.b===undefined?null:m.b),ts:m.ts||0}))};
+  users[id]={reg:u.reg,nick:u.nick||"",name:u.name||"",fld:u.fld||"",on:u.on,codeOk:u.codeOk,inv:u.inv||null,pin:u.pin||null,bal:u.bal||0,lim:u.lim||[],msgs:(u.msgs||[]).map(sanitizeMsg)};
  });
  return {leads,wd,L,dm,codes,users};
 }
@@ -285,6 +293,15 @@ function pinTap(n){const u=U[cur];if(u.pinBuf.length>=4)return;u.pinBuf+=n;u.err
  render()}
 function pinDel(){const u=U[cur];u.pinBuf=u.pinBuf.slice(0,-1);u.pinResult=null;render()}
 function doLock(){const u=U[cur];if(u.id=="admin"||!u.on)return;u.locked=true;u.lockStage="nick";u.lockPinBuf="";u.lockErr="";render()}
+// --- Автоблокировка при сворачивании приложения / блокировке экрана телефона: приложение уходит из видимости (document.hidden) -> сразу блокируем экран (план: чат -> логин -> код-пароль), как при ручном "Свернуть" в демо-панели. Срабатывает и при уходе в другое приложение, и при блокировке экрана телефона — для обоих Telegram использует тот же механизм видимости страницы. ---
+try{
+ document.addEventListener("visibilitychange",()=>{
+  if(document.hidden){
+   const u=U[cur];
+   if(u&&u.id!=="admin"&&u.on&&!u.locked)doLock();
+  }
+ });
+}catch(e){}
 function lockNickSubmit(){const u=U[cur];const v=($("lkn")?$("lkn").value:"").trim();
  const norm=s=>s.replace(/^@/,"").toLowerCase();
  if(!v||norm(v)!==norm(u.nick)){u.lockErr="Ник не совпадает. Попробуйте снова.";return render()}

@@ -185,7 +185,7 @@ function snapshotForSync(){
  Object.keys(U).forEach(id=>{
   if(id==="admin")return;
   const u=U[id];
-  users[id]={reg:u.reg,nick:u.nick,name:u.name,fld:u.fld,on:u.on,codeOk:u.codeOk,inv:u.inv,pin:u.pin,bal:u.bal,lim:u.lim,msgs:u.msgs};
+  users[id]={reg:u.reg,nick:u.nick||"",name:u.name||"",fld:u.fld||"",on:u.on,codeOk:u.codeOk,inv:u.inv||null,pin:u.pin||null,bal:u.bal||0,lim:u.lim||[],msgs:(u.msgs||[]).map(m=>({t:m.t||"",b:(m.b===undefined?null:m.b),ts:m.ts||0}))};
  });
  return {leads,wd,L,dm,codes,users};
 }
@@ -208,7 +208,7 @@ function scheduleSync(){
  clearTimeout(_syncTimer);
  _syncTimer=setTimeout(()=>{
   try{
-   DB.ref(SYNC_PATH).set(snapshotForSync())
+   DB.ref(SYNC_PATH).set(JSON.parse(JSON.stringify(snapshotForSync())))
     .then(()=>fbDbg("отправлено ✓ ("+new Date().toLocaleTimeString()+")"))
     .catch(e=>fbDbg("ОШИБКА ОТПРАВКИ: "+(e&&e.code||e&&e.message||e)));
   }catch(e){fbDbg("ошибка отправки (sync): "+(e&&e.message||e))}

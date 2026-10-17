@@ -253,7 +253,14 @@ function totalUnread(u){
  if(hasDm(u.id,"admin"))n+=unreadWith(u,"admin");
  return n}
 function newP(){n++;const id="p"+n;U[id]=mk(id,"",false,null);cur=id;render()}
-function cp(t,b){const ok=()=>{b.textContent="Скопировано ✓";setTimeout(()=>{b.textContent="Копировать"},1500)};try{navigator.clipboard.writeText(t).then(ok,()=>fb())}catch(e){fb()}function fb(){const x=document.createElement("textarea");x.value=t;document.body.appendChild(x);x.select();try{document.execCommand("copy")}catch(e){}x.remove();ok()}}
+let _copiedCodes={};
+function cp(t){
+ // Состояние "скопировано" хранится в переменной (а не прямо в DOM-кнопке), чтобы повторный render()
+ // (например, из-за синхронизации чьих-то чужих данных) не сбрасывал подсветку досрочно.
+ const ok=()=>{_copiedCodes[t]=true;render();setTimeout(()=>{delete _copiedCodes[t];render()},1500)};
+ try{navigator.clipboard.writeText(t).then(ok,()=>fb())}catch(e){fb()}
+ function fb(){const x=document.createElement("textarea");x.value=t;document.body.appendChild(x);x.select();try{document.execCommand("copy")}catch(e){}x.remove();ok()}
+}
 function buildPhone(d){
  if(!d)return"";
  const r=d.length>1?d.slice(1):"";
@@ -347,7 +354,7 @@ function fmtAgo(ts){if(!ts)return"Без заявок";
  const diff=Math.round((day(new Date())-day(new Date(ts)))/86400000);
  if(diff<=0)return"Новая заявка";
  return"Без заявок ("+diff+"дн)"}
-function gen(){codes=codes.filter(c=>c.o!=cur);codes.push({c:Math.random().toString(36).slice(2,6).toUpperCase()+"-"+Math.random().toString(36).slice(2,6).toUpperCase(),o:cur});render()}
+function gen(){codes=codes.filter(c=>c.o!=cur);codes.push({c:Math.random().toString(36).slice(2,6).toUpperCase()+"-"+Math.random().toString(36).slice(2,6).toUpperCase(),o:cur,ts:Date.now()});render()}
 function send(){
  const u=U[cur];let v=$("in").value.trim();if(!v)return;if(u.on)v=cap(v);u.msgs.push({t:v,me:1});u.err="";
  if(!u.on){
@@ -488,6 +495,7 @@ function doReg(){const u=U[cur],nk=$("rn").value.trim(),nm=$("rm").value.trim(),
  u.nick=nk[0]=="@"?nk:"@"+nk;u.name=nm;u.fld=fl;u.reg=true;u.rnVal="";u.rmVal="";u.rfVal="";render()}
 function act(){const u=U[cur],m=$("ac").value.trim().match(/^(\S+)$/i),k=m?codes.findIndex(x=>x.c==m[1].toUpperCase()):-1;
  if(k<0){u.err="Неверная команда или код уже использован.";return render()}
+ if(codes[k].ts&&(Date.now()-codes[k].ts)>5*60*1000){codes.splice(k,1);u.err="Код устарел просьба ввести новый код активации.";return render()}
  u.inv=codes[k].o;codes.splice(k,1);u.err="";u.codeOk=true;render()}
 function wdStage1(u){
  return `<div class="c"><b>Вывод средств</b>
@@ -525,16 +533,20 @@ function prof(u){
  if(u.wdListOpen)return wdMyRequests(u);
  const hasWd=wd.some(x=>x.o==u.id);
  const topBlock=`<div class="c">
- <div style="font-weight:600;margin-bottom:${hasWd?"0":"8"}px">${esc(u.nick)}</div>
- ${hasWd?`<div style="text-align:right;margin:0"><button style="padding:3px 9px;font-size:12px" onclick="U['${u.id}'].wdListOpen=true;render()">Заявки на вывод</button></div>`:""}
- <div class="r" style="justify-content:space-between;align-items:center;margin-top:${hasWd?"2":"0"}px">
+ <div style="font-weight:600;margin-bottom:4px">${esc(u.nick)}</div>
  <div><div class="mu">Баланс</div><div class="ok" style="font-size:24px">${rub(u.bal)}</div></div>
- <button onclick="U['${u.id}'].wdForm=!U['${u.id}'].wdForm;render()">Вывести средства</button>
+ <div class="r" style="margin-top:10px;gap:8px">
+ ${hasWd?`<button style="flex:1" onclick="U['${u.id}'].wdListOpen=true;render()">Заявки на вывод</button>`:""}
+ <button class="p" style="flex:1" onclick="U['${u.id}'].wdForm=!U['${u.id}'].wdForm;render()">Вывести средства</button>
  </div></div>`;
  const wdBlock=u.wdForm?(u.wdReqForm?wdStage2(u):wdStage1(u)):"";
  return `${topBlock}
  ${wdBlock}
- <div class="c"><b>Мои лимиты</b><table><tr><th>Стоимость объекта</th><th>Вознаграждение</th><th>Ваш лимит</th></tr>${TIERS.map((t,i)=>`<tr><td style="white-space:nowrap;font-size:12px">${tierLabel(i)}</td><td style="white-space:nowrap;font-size:12px">${t.base==t.cap?t.base.toLocaleString("ru-RU")+" фикс":t.base.toLocaleString("ru-RU")+"–"+t.cap.toLocaleString("ru-RU")}</td><td>${rub(u.lim[i])}${u.lim[i]>t.base?' <span style="color:#16a34a;font-weight:700">↑</span>':""}${u.lim[i]>=t.cap?" 🏆":""}</td></tr>`).join("")}</table>
+ <div class="c"><b>Мои лимиты</b><p class="mu" style="margin-top:2px">Ваше текущее вознаграждение по каждому диапазону стоимости объекта</p>
+ <div class="lcard" style="margin-top:8px">${TIERS.map((t,i)=>{const achieved=u.lim[i]>=t.cap,grew=u.lim[i]>t.base;return `<div class="lrow" style="align-items:center;padding:8px 0">
+  <span style="line-height:1.4">${t.n}<br><span style="font-size:11px;opacity:.75">${t.base==t.cap?t.base.toLocaleString("ru-RU")+" фикс":t.base.toLocaleString("ru-RU")+"–"+t.cap.toLocaleString("ru-RU")}</span></span>
+  <span style="text-align:right;font-weight:700;font-size:15px;${achieved?"color:#eab308":"color:var(--ok)"}">${rub(u.lim[i])}${grew?' <span style="color:#16a34a">↑</span>':""}${achieved?" 🏆":""}</span>
+ </div>`}).join("")}</div>
  <button style="width:100%;margin-top:10px" onclick="U['${u.id}'].limInfo=!U['${u.id}'].limInfo;render()">${u.limInfo?"Скрыть":"ℹ️ Подробнее о вознаграждении"}</button>
  ${u.limInfo?`<div style="margin-top:8px">${FAQ_REWARD}</div>`:""}</div>
 `}
@@ -646,7 +658,7 @@ function prt(u){
  const ps=Object.values(U).filter(x=>x.inv==u.id);
  const rows=ps.map(p=>{const ls=leads.filter(l=>l.o==p.id),d=ls.filter(l=>l.paid).length,b=L.filter(x=>x.to==u.id&&x.from==p.id).reduce((a,x)=>a+x.sum,0),last=ls.length?Math.max(...ls.map(l=>l.ts||0)):0;
  return `<tr style="cursor:pointer" onclick="U['${u.id}'].viewPartner='${p.id}';render()"><td>${p.nick}${p.on?"":" ⏳"}</td><td>${ls.length}</td><td>${d}</td><td>${rub(b)}</td><td class="mu">${fmtAgo(last)}</td></tr>`}).join("");
- return `<div class="c"><b>Пригласить партнера</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${my.map(c=>`<span class="cc"><span>${c.c}</span><button onclick="cp('${c.c}',this)">Копировать</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div></div>
+ return `<div class="c"><b>Пригласить партнера</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Код действует 5 минут после создания.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${my.map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div></div>
  <div class="c"><b>Мои партнеры</b><p class="mu">Вы получаете 10% с вознаграждения каждого приглашенного партнера, <u>его выплата не уменьшается</u>. Нажмите на партнера, чтобы увидеть статусы его заявок.</p>
  <table><tr><th>Ник</th><th>Заявки</th><th>Сделки</th><th>Ваш бонус</th><th>Активность</th></tr>${rows||'<tr><td colspan=5 class="mu">Пока никого. Создайте код в профиле.</td></tr>'}</table></div>`}
 function adminSupportChat(){
@@ -699,7 +711,28 @@ function admPartnersView(){
  <div class="mu">${esc(p.name)||"—"} · ${esc(p.fld)||"—"} · от ${inv}</div>
  <table style="margin-top:8px"><tr><th>Заявки</th><th>Сделки</th><th>Прибыль</th><th>Реферал</th><th>Активность</th></tr>
  <tr><td>${ls.length}</td><td>${deals.length}</td><td>${rub(profit)}</td><td>${refs}</td><td class="mu">${fmtAgo(last)}</td></tr></table></div>`}).join("")||'<div class="mu">Нет зарегистрированных партнеров</div>';
- return `<div class="c"><b>Коды администратора</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${codes.filter(c=>c.o=="admin").map(c=>`<span class="cc"><span>${c.c}</span><button onclick="cp('${c.c}',this)">Копировать</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div></div>${list}`}
+ return `<div class="c"><b>Коды администратора</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Код действует 5 минут после создания.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${codes.filter(c=>c.o=="admin").map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div></div>
+ <div class="c"><b style="color:#dc2626">Опасная зона</b><p class="mu">Полностью очищает все тестовые данные: партнеров, заявки, коды, сообщения и запросы на вывод. Используйте только для тестирования.</p><button style="width:100%;${_resetArmed?"background:#dc2626;color:#fff;border-color:#dc2626":"border-color:#dc2626;color:#dc2626"}" onclick="adminResetAll()">${_resetArmed?"⚠️ Нажмите еще раз, чтобы подтвердить":"🗑 Сбросить все тестовые данные"}</button></div>
+ ${list}`}
+let _resetArmed=false,_resetArmTimer=null;
+function adminResetAll(){
+ if(U[cur].id!=="admin")return;
+ // Два нажатия подряд вместо браузерного confirm() — в Telegram Mini Apps стандартные диалоги confirm/alert
+ // заблокированы и не работают надежно, поэтому подтверждение сделано прямо в интерфейсе приложения.
+ if(!_resetArmed){
+  _resetArmed=true;clearTimeout(_resetArmTimer);
+  _resetArmTimer=setTimeout(()=>{_resetArmed=false;render()},5000);
+  return render();
+ }
+ _resetArmed=false;clearTimeout(_resetArmTimer);
+ leads=[];wd=[];L=[];dm=[];codes=[{c:"START-0001",o:"admin"}];
+ Object.keys(U).forEach(id=>{if(id!=="admin")delete U[id]});
+ U.p1=mk("p1","@alexey",true,"admin");U.p1.msgs.push({t:ONB,b:1,ts:Date.now()});
+ U.p2=mk("p2","",false,null);
+ U.admin.viewPartner=null;
+ if(!U[cur])cur="admin";
+ render();
+}
 function toggleLead(i){leads[i]._expanded=!leads[i]._expanded;render()}
 function admLeadsView(){
  const l=leads.map((x,i)=>{const o=U[x.o],ref=o.inv&&o.inv!="admin"?U[o.inv]:null;

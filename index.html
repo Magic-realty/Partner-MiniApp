@@ -27,8 +27,8 @@ body.in-tg,html.in-tg{height:100%;overflow:hidden}
 .svq-b{padding:0 0 10px;color:var(--mu)}
 .hd{background:var(--ac);color:#fff;padding:10px 14px;font-weight:600}
 .body{flex:1;padding:10px;overflow-y:auto;-webkit-overflow-scrolling:touch}
-.nav{display:flex;border-top:1px solid var(--bd)}
-.nav button{flex:1;border:0;background:none;padding:10px 2px;color:var(--mu);font-size:13px}
+.nav{display:flex;border-top:1px solid var(--bd);background:var(--card);padding-bottom:max(8px,env(safe-area-inset-bottom,0px))}
+.nav button{flex:1;border:0;background:none;padding:14px 2px;color:var(--mu);font-size:13px;min-height:48px}
 .nav button.on{color:var(--ac);font-weight:600}
 button,input,select,textarea{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:7px 9px}
 input,select,textarea{width:100%;margin:3px 0;font-size:16px}
@@ -214,7 +214,7 @@ const FAQ_PARTNER=`<div class="c"><b>Партнерское вознагражд
 <div class="qa"><b>❓ Как быстро происходит выплата?</b>После статуса «Сделка состоялась» в заявке партнера, средства поступают на ваш баланс в течение 3–7 дней (в течение 1 суток при максимальном лимите хотя бы в одной категории).</div>
 <div class="qa"><b>❓ Как получить выплату?</b>«Профиль» → «Вывести средства» → способ получения → сумма → данные → «Подтвердить». Средства поступают от 10 минут до 3 дней.</div>
 </div>`;
-let U={admin:{id:"admin",nick:"@admin",activeChat:null,pairChat:null,chatSub:"support",tab:"Чаты",viewPartner:null,lastSeen:{}},p1:mk("p1","@alexey",true,"admin")},codes=[{c:"START-0001",o:"admin"}],leads=[],wd=[],L=[],dm=[],cur="p2",n=2;
+let U={admin:{id:"admin",nick:"@admin",activeChat:null,pairChat:null,chatSub:"support",tab:"Чаты",viewPartner:null,lastSeen:{},pin:null,pinStage:"enter",pinBuf:"",pinFirst:null,pinResult:null,err:"",locked:false,lockStage:"nick",lockPinBuf:"",lockErr:""},p1:mk("p1","@alexey",true,"admin")},codes=[{c:"START-0001",o:"admin"}],leads=[],wd=[],L=[],dm=[],cur="p2",n=2;
 U.p2=mk("p2","",false,null);U.p1.msgs.push({t:ONB,b:1,ts:Date.now()});
 if(REAL_USER_ID){
  // авто-вход: админ -> админ-панель; реальный партнер в Telegram -> его собственный аккаунт по стабильному tg-id (не p2!)
@@ -232,8 +232,11 @@ function sanitizeMsg(m){
 function snapshotForSync(){
  const users={};
  Object.keys(U).forEach(id=>{
-  if(id==="admin")return;
   const u=U[id];
+  // Для админа синхронизируется только код-пароль (pin) - чтобы он не "забывался" при каждой перезагрузке
+  // страницы на любом устройстве; остальные поля админа (чаты, вкладки, статус блокировки) синхронизировать
+  // не нужно - это разовый аккаунт, не партнер, и его рабочее состояние UI сугубо локально для сессии.
+  if(id==="admin"){users[id]={pin:u.pin||null};return}
   users[id]={reg:u.reg,nick:u.nick||"",name:u.name||"",fld:u.fld||"",on:u.on,codeOk:u.codeOk,inv:u.inv||null,pin:u.pin||null,bal:u.bal||0,lim:u.lim||[],msgs:(u.msgs||[]).map(sanitizeMsg)};
  });
  return {leads,wd,L,dm,codes,users};
@@ -247,7 +250,7 @@ function applyRemoteSnapshot(data){
  codes=Array.isArray(data.codes)?data.codes:codes;
  const ru=data.users||{};
  Object.keys(ru).forEach(id=>{
-  if(id==="admin")return;
+  if(id==="admin"){if(ru[id]&&ru[id].pin)U.admin.pin=ru[id].pin;return}
   if(!U[id])U[id]=mk(id,"",false,null);
   Object.assign(U[id],ru[id]);
  });
@@ -275,7 +278,9 @@ if(DB){
     if(!_firstSyncApplied){
      _firstSyncApplied=true;
      const u0=U[cur];
-     if(u0&&u0.id!=="admin"&&u0.on){u0.locked=true;u0.lockStage="nick";u0.lockPinBuf="";u0.lockErr=""}
+     // Готов к блокировке: у партнера - после активации (on=true), у админа - после того как он хоть раз задал код-пароль (pin).
+     const ready0=u0&&(u0.id==="admin"?!!u0.pin:u0.on);
+     if(ready0){u0.locked=true;u0.lockStage="nick";u0.lockPinBuf="";u0.lockErr=""}
     }
     render();
    }catch(e){}
@@ -331,7 +336,7 @@ function pinTap(n){const u=U[cur];if(u.pinBuf.length>=4)return;u.pinBuf+=n;u.err
   }else{
    if(u.pinBuf==u.pinFirst){
     u.pinResult="ok";render();
-    setTimeout(()=>{u.pin=u.pinBuf;u.on=true;u.tab="Чаты";bot(cur,ONB,1);render()},500);return;
+    setTimeout(()=>{u.pin=u.pinBuf;if(u.id=="admin"){/* админу не нужны шаги активации партнера/онбординг-сообщения */}else{u.on=true;u.tab="Чаты";bot(cur,ONB,1)}render()},500);return;
    }else{
     u.pinResult="err";render();
     setTimeout(()=>{u.err="Коды не совпадают. Придумайте новый код-пароль.";u.pinStage="enter";u.pinFirst=null;u.pinBuf="";u.pinResult=null;render()},600);return;
@@ -340,13 +345,19 @@ function pinTap(n){const u=U[cur];if(u.pinBuf.length>=4)return;u.pinBuf+=n;u.err
  }
  render()}
 function pinDel(){const u=U[cur];u.pinBuf=u.pinBuf.slice(0,-1);u.pinResult=null;render()}
-function doLock(){const u=U[cur];if(u.id=="admin"||!u.on)return;u.locked=true;u.lockStage="nick";u.lockPinBuf="";u.lockErr="";render()}
-// --- Автоблокировка при сворачивании приложения / блокировке экрана телефона: приложение уходит из видимости (document.hidden) -> сразу блокируем экран (план: чат -> логин -> код-пароль), как при ручном "Свернуть" в демо-панели. Срабатывает и при уходе в другое приложение, и при блокировке экрана телефона — для обоих Telegram использует тот же механизм видимости страницы. ---
+function adminPinSetup(u){
+ return `<div class="c" style="text-align:center"><b>${u.pinStage=="enter"?"Придумайте код-пароль":"Повторите код-пароль"}</b>
+ <p class="mu">${u.pinStage=="enter"?"4 цифры для входа в админ-панель":"Введите код-пароль еще раз для подтверждения"}</p>
+ <div class="pin">${[0,1,2,3].map(i=>`<span class="${u.pinBuf.length>i?"f":""}"></span>`).join("")}</div>
+ <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.err||"")}</div>
+ <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button onclick="pinTap('${n}')">${n}</button>`).join("")}<button class="stat ${u.pinResult||""}" disabled>${u.pinResult=="ok"?"✓":u.pinResult=="err"?"✕":""}</button><button onclick="pinTap('0')">0</button><button onclick="pinDel()">⌫</button></div></div>`}
+function doLock(){const u=U[cur];const ready=u.id=="admin"?!!u.pin:u.on;if(!ready)return;u.locked=true;u.lockStage="nick";u.lockPinBuf="";u.lockErr="";render()}
+// --- Автоблокировка при сворачивании приложения / блокировке экрана телефона: приложение уходит из видимости (document.hidden) -> сразу блокируем экран (план: чат -> логин -> код-пароль), как при ручном "Свернуть" в демо-панели. Срабатывает и при уходе в другое приложение, и при блокировке экрана телефона — для обоих Telegram использует тот же механизм видимости страницы. Действует и на партнера, и на админа (у админа - после того как он хоть раз задал себе код-пароль). ---
 try{
  document.addEventListener("visibilitychange",()=>{
   if(document.hidden){
    const u=U[cur];
-   if(u&&u.id!=="admin"&&u.on&&!u.locked)doLock();
+   if(u&&!u.locked){const ready=u.id==="admin"?!!u.pin:u.on;if(ready)doLock()}
   }
  });
 }catch(e){}
@@ -502,8 +513,9 @@ function render(){
   else{const key=(!u.activeChat||u.activeChat=="self")?"self":(u.activeChat=="faq"?null:u.activeChat);if(key)u.lastSeen[key]=Date.now()}
  }
  const tabs=u.id=="admin"?["Запросы","Чаты","Заявки","Партнеры"]:["Профиль","Чаты","Заявки","Партнеры"];
- $("nv").innerHTML=tabs.map(t=>{const badge=t=="Чаты"&&totalUnread(u)>0?` <span class="badge">${totalUnread(u)}</span>`:"";return `<button ${(u.id!="admin"&&(!u.on||u.locked))?"disabled":""} class="${u.tab==t&&(u.id=="admin"||u.on)&&!u.locked?"on":""}" onclick="tab('${t}')">${t}${badge}</button>`}).join("");
- $("bd").innerHTML=u.id=="admin"?({Чаты:admChatsView,Партнеры:admPartnersView,Заявки:admLeadsView,Запросы:admWdView}[u.tab||"Чаты"])():!u.on?gate(u):u.locked?chatLocked(u):({Профиль:prof,Чаты:chat,Заявки:req,Партнеры:prt}[u.tab])(u);
+ const ready=u.id=="admin"?!!u.pin:u.on; // готов к работе: у партнера после активации, у админа после того как задан код-пароль
+ $("nv").innerHTML=tabs.map(t=>{const badge=t=="Чаты"&&totalUnread(u)>0?` <span class="badge">${totalUnread(u)}</span>`:"";return `<button ${(!ready||u.locked)?"disabled":""} class="${u.tab==t&&ready&&!u.locked?"on":""}" onclick="tab('${t}')">${t}${badge}</button>`}).join("");
+ $("bd").innerHTML=u.id=="admin"?(!u.pin?adminPinSetup(u):u.locked?chatLocked(u):({Чаты:admChatsView,Партнеры:admPartnersView,Заявки:admLeadsView,Запросы:admWdView}[u.tab||"Чаты"])()):!u.on?gate(u):u.locked?chatLocked(u):({Профиль:prof,Чаты:chat,Заявки:req,Партнеры:prt}[u.tab])(u);
  $("modal").innerHTML=u.svInfo?svInfoModal(u):"";
  const c=$("cl");if(c)c.scrollTop=c.scrollHeight;
  if(u.errFocus){const el=$(u.errFocus);if(el){el.focus();if(el.select)el.select()}u.errFocus=null}

@@ -361,6 +361,29 @@ try{
   }
  });
 }catch(e){}
+// --- Клавиатуру на телефоне можно свернуть тапом в любое пустое место экрана (не на поле ввода/кнопку/список) -
+// на некоторых мобильных устройствах внутри Telegram иначе нет никакого способа закрыть раскладку клавиатуры
+// самостоятельно (нет отдельной кнопки "Готово"/стрелки вниз), и клавиатура закрывает элементы формы, к которым
+// нет другого способа добраться. ---
+try{
+ document.addEventListener("click",e=>{
+  const tag=e.target&&e.target.tagName;
+  if(tag!=="INPUT"&&tag!=="TEXTAREA"&&tag!=="SELECT"&&tag!=="BUTTON"&&document.activeElement&&document.activeElement!==document.body&&document.activeElement.blur)document.activeElement.blur();
+ });
+}catch(e){}
+// --- Поле/кнопка, к которым переходит фокус, всегда остаются видны над клавиатурой: после открытия клавиатуры
+// (с небольшой задержкой, чтобы успела завершиться анимация появления клавиатуры) активное поле ввода
+// подскролливается в видимую область экрана. Это касается и кнопки "Зарегистрироваться" и т.п. сразу под полем -
+// браузер по умолчанию подскролливает только само поле, а не форму целиком, и соседняя кнопка могла оставаться
+// перекрыта клавиатурой без возможности до нее доскроллить. ---
+try{
+ document.addEventListener("focusin",e=>{
+  const t=e.target,tag=t&&t.tagName;
+  if(tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT"){
+   setTimeout(()=>{try{t.scrollIntoView&&t.scrollIntoView({block:"center",behavior:"smooth"})}catch(err){}},300);
+  }
+ });
+}catch(e){}
 function lockNickSubmit(){const u=U[cur];const v=($("lkn")?$("lkn").value:"").trim();
  const norm=s=>s.replace(/^@/,"").toLowerCase();
  if(!v||norm(v)!==norm(u.nick)){u.lockErr="Ник не совпадает. Попробуйте снова.";return render()}

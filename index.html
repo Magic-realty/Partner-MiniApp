@@ -174,7 +174,7 @@ const mk=(id,nick,on,inv)=>({id,nick,on,inv,reg:!!nick,codeOk:!!on,pinStage:"ent
  locked:false,lockStage:"nick",lockPinBuf:"",lockErr:"",svInfo:false,svOpen:{}});
 const tierLabel=i=>{const t=TIERS[i],fmt=n=>n.toLocaleString("ru-RU");return i==0?`до<br>${fmt(t.max)}`:`от ${fmt(TIERS[i-1].max)}<br>до ${fmt(t.max)}`};
 const cap=s=>s.replace(/(^\s*|[.!?]\s+)([a-zа-яё])/gi,(m,p1,p2)=>p1+p2.toUpperCase());
-const ONB="Профиль успешно активирован!\n\nПри каждом входе в приложение необходимо:\n\n• Зайти в чат → Отправить свой никнейм → Ввести пароль\n\n• Приложение автоматически разрешит доступ ко всем вкладкам.";
+const ONB="Профиль успешно активирован! (зеленая галочка в квадрате)\n\nПри каждом входе в приложение необходимо:\n\n• Зайти в чат → Отправить свой никнейм → Ввести пароль\n\n• Приложение автоматически разрешит доступ ко всем вкладкам.";
 const PAYSTAT=["ИП","Самозанятость","Физическое лицо"];
 const PAYSYS_OTHER=["Банковская карта","ЮMoney"];
 const PAYSYS_IP="Расчетный счет";
@@ -409,14 +409,14 @@ function svInfoModal(u){
  <div class="mbd">${SERVICES_INFO.map(([n,d])=>{const open=!!(u.svOpen&&u.svOpen[n]);return `<div class="svq"><div class="svq-h${open?" open":""}" onclick="toggleSvInfo('${u.id}','${n.replace(/'/g,"\\'")}')">${esc(n)}<span class="chev">▾</span></div>${open?`<div class="svq-b">${esc(d)}</div>`:""}</div>`}).join("")}</div>
  </div></div>`}
 function chatLocked(u){
- if(u.lockStage=="nick")return `<div id="cl" style="max-height:300px;overflow-y:auto"></div>
+ if(u.lockStage=="nick")return `<div style="display:flex;flex-direction:column;height:100%"><div id="cl" style="flex:1;overflow-y:auto"></div>
  <div class="r" style="margin-top:6px"><input id="lkn" placeholder="Сообщение" onkeydown="if(event.key=='Enter')lockNickSubmit()"><button class="p" onclick="lockNickSubmit()">➤</button></div>
- <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.lockErr||"")}</div>`;
- return `<div id="cl" style="max-height:300px;overflow-y:auto"></div>
+ <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.lockErr||"")}</div></div>`;
+ return `<div style="display:flex;flex-direction:column;height:100%"><div id="cl" style="flex:1;overflow-y:auto"></div>
  <div class="c" style="text-align:center;margin-top:8px"><b>Введите пароль</b>
  <div class="pin">${[0,1,2,3].map(i=>`<span class="${u.lockPinBuf.length>i?"f":""}"></span>`).join("")}</div>
  <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.lockErr||"")}</div>
- <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button onclick="lockPinTap('${n}')">${n}</button>`).join("")}<button class="stat" disabled></button><button onclick="lockPinTap('0')">0</button><button onclick="lockPinDel()">⌫</button></div></div>`}
+ <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button onclick="lockPinTap('${n}')">${n}</button>`).join("")}<button class="stat" disabled></button><button onclick="lockPinTap('0')">0</button><button onclick="lockPinDel()">⌫</button></div></div></div>`}
 function stColor(st){
  if(["Ждем подтверждения клиента","Первый контакт состоялся","Договорились о встрече","Не отвечает"].includes(st))return"st-grey";
  if(["Условия согласованы","Принят в работу","Думает"].includes(st))return"st-yellow";
@@ -439,7 +439,7 @@ function send(){
  }else bot(cur,"Сообщение передано в поддержку.");
  render();
 }
-function ackAny(i){const m=U[cur].msgs[i];m.b=0;m.done=1;if(m.t.startsWith("Профиль"))U[cur].msgs.push({t:"Как создать заявку?\n\n1) Нажать в чате кнопку «Создать заявку».\n\n2) Заполнить форму и отправить.\n\n3) После отправки у вас откроется новая вкладка «Заявки».\n\n4) Вкладка «Заявки» дает возможность в режиме реального времени видеть статус, комментарии, вознаграждение.",lead:1,ts:Date.now()});render()}
+function ackAny(i){const m=U[cur].msgs[i];m.b=0;m.done=1;if(m.t.startsWith("Профиль"))U[cur].msgs.push({t:"Как создать заявку?\n\n1) Нажать в чате кнопку «Создать заявку».\n\n2) Заполнить форму и отправить.\n\n3) После отправки у вас откроется новая вкладка «Заявки».\n\n4) Вкладка «Заявки» дает возможность в режиме реального времени видеть статус, комментарии, информацию по объекту и вознаграждение.",lead:1,ts:Date.now()});render()}
 function addLead(){
  const u=U[cur],f=$("f").value.trim(),p=$("p").value.trim(),cm=$("cm").value.trim(),s=$("s").value,wEl=document.querySelector('input[name="w"]:checked');
  u.lf=f;u.lp=p;u.ls=s;u.lcm=cm;u.lw=wEl?wEl.value:"";
@@ -646,11 +646,11 @@ function chat(u){
  <button style="flex:1" class="${u.activeChat=="faq"?"p":""}" onclick="U['${u.id}'].activeChat='faq';render()">❓ Частые вопросы</button>
  </div>`;
  if(u.activeChat=="faq"){
-  return switcher+`<div class="faqtabs">
+  return `<div style="display:flex;flex-direction:column;height:100%">${switcher}<div class="faqtabs">
  <button class="${(u.faqTab||"reward")=="reward"?"p":""}" onclick="U['${u.id}'].faqTab='reward';render()">Вознаграждение</button>
  <button class="${u.faqTab=="partners"?"p":""}" onclick="U['${u.id}'].faqTab='partners';render()">Партнеры</button>
  </div>
- <div id="cl" style="max-height:300px;overflow-y:auto">${u.faqTab=="partners"?FAQ_PARTNER:FAQ_REWARD}</div>`+extra;
+ <div id="cl" style="flex:1;overflow-y:auto">${u.faqTab=="partners"?FAQ_PARTNER:FAQ_REWARD}</div>${extra}</div>`;
  }
  if(u.activeChat&&u.activeChat!="self"){
   const other=U[u.activeChat];
@@ -658,12 +658,12 @@ function chat(u){
   const emptyTxt=isSupport?"Сообщений пока нет. Напишите в поддержку.":`Сообщений пока нет. Напишите ${esc(other.nick)}.`;
   const placeholderTxt=isSupport?"Сообщение в поддержку":`Сообщение: ${esc(other.nick)}`;
   const msgs=dm.filter(x=>(x.a==u.id&&x.b==other.id)||(x.a==other.id&&x.b==u.id)).sort((a,b)=>a.ts-b.ts);
-  return switcher+`<div id="cl" style="max-height:300px;overflow-y:auto">${msgs.map(x=>`<div class="b ${x.from==u.id?"me":""}">${esc(x.text)}</div>`).join("")||`<div class="mu">${emptyTxt}</div>`}</div>
- <div class="r" style="margin-top:6px"><input id="dmin" placeholder="${placeholderTxt}" onkeydown="if(event.key=='Enter')sendDm()"><button class="p" onclick="sendDm()">➤</button></div>`+extra;
+  return `<div style="display:flex;flex-direction:column;height:100%">${switcher}<div id="cl" style="flex:1;overflow-y:auto">${msgs.map(x=>`<div class="b ${x.from==u.id?"me":""}">${esc(x.text)}</div>`).join("")||`<div class="mu">${emptyTxt}</div>`}</div>
+ <div class="r" style="margin-top:6px"><input id="dmin" placeholder="${placeholderTxt}" onkeydown="if(event.key=='Enter')sendDm()"><button class="p" onclick="sendDm()">➤</button></div>${extra}</div>`;
  }
  const m=u.msgs.map((x,i)=>`<div class="b ${x.me?"me":""}">${esc(x.t)}${x.b?`<button class="p" style="display:block;margin-top:12px" onclick="ackAny(${i})">Ознакомился</button>`:""}${x.lead?`<button class="p" style="display:block;margin-top:12px" onclick="U['${u.id}'].form=true;U['${u.id}'].tab='Заявки';render()">Создать заявку</button>`:""}</div>`).join("");
- return switcher+`<div id="cl" style="max-height:300px;overflow-y:auto">${m||'<div class="mu">Чат пуст. Отправьте код приглашения.</div>'}</div>
- <div class="r" style="margin-top:6px"><input id="in" placeholder="${u.on?"Сообщение":"XXXX-XXXX"}" onkeydown="if(event.key=='Enter')send()"><button class="p" onclick="send()">➤</button></div>`+extra}
+ return `<div style="display:flex;flex-direction:column;height:100%">${switcher}<div id="cl" style="flex:1;overflow-y:auto">${m||'<div class="mu">Чат пуст. Отправьте код приглашения.</div>'}</div>
+ <div class="r" style="margin-top:6px"><input id="in" placeholder="${u.on?"Сообщение":"XXXX-XXXX"}" onkeydown="if(event.key=='Enter')send()"><button class="p" onclick="send()">➤</button></div>${extra}</div>`}
 function leadDetail(u,l){
  const mi=MAIN.indexOf(l.st),unlocked=mi>=4;
  const t=l.price?tier(l.price):0;

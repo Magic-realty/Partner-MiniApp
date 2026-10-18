@@ -176,6 +176,10 @@ try{
   if(firebase.auth)firebase.auth().signInAnonymously().catch(e=>fbDbg("ошибка анонимного входа: "+(e&&e.code||e)));
  }
 }catch(e){DB=null;fbDbg("ошибка инициализации: "+(e&&e.message||e))}
+// Срок жизни одноразового кода приглашения - 5 минут (возвращено по явной просьбе; реальная причина, по которой
+// новые устройства не могли активироваться, была не в этом сроке - см. комментарий у инициализации Firebase выше
+// и строку fbDbg ниже: вероятная причина - ошибка анонимного входа в Firebase на новом устройстве).
+const CODE_TTL_MS=5*60*1000;
 const TIERS=[{n:"до 10 млн",max:1e7,base:3e4,cap:3e4},{n:"10–20 млн",max:2e7,base:5e4,cap:1e5},{n:"20–30 млн",max:3e7,base:1e5,cap:2e5},{n:"30–40 млн",max:4e7,base:2e5,cap:3e5},{n:"40–50 млн",max:5e7,base:3e5,cap:4e5},{n:"50–60 млн",max:6e7,base:4e5,cap:5e5},{n:"60–70 млн",max:7e7,base:5e5,cap:6e5},{n:"70–80 млн",max:8e7,base:6e5,cap:7e5},{n:"80–90 млн",max:9e7,base:7e5,cap:8e5},{n:"90–100 млн",max:1e8,base:8e5,cap:9e5}];
 const SV=["Затрудняюсь ответить","Классическая продажа","Быстрая продажа","Срочный выкуп","Подбор вторички","Подбор новостроек","Подбор зарубежной недвижимости"];
 const SERVICES_INFO=[
@@ -198,7 +202,7 @@ const mk=(id,nick,on,inv)=>({id,nick,on,inv,reg:!!nick,codeOk:!!on,pinStage:"ent
  locked:false,lockStage:"nick",lockPinBuf:"",lockErr:"",svInfo:false,svOpen:{}});
 const tierLabel=i=>{const t=TIERS[i],fmt=n=>n.toLocaleString("ru-RU");return i==0?`до<br>${fmt(t.max)}`:`от ${fmt(TIERS[i-1].max)}<br>до ${fmt(t.max)}`};
 const cap=s=>s.replace(/(^\s*|[.!?]\s+)([a-zа-яё])/gi,(m,p1,p2)=>p1+p2.toUpperCase());
-const ONB="Профиль успешно активирован! ✅\n\nПри каждом входе в приложение необходимо:\n\n• Зайти в чат → Отправить свой никнейм → Ввести пароль\n\n• Приложение автоматически разрешит доступ ко всем вкладкам.";
+const ONB="Профиль успешно активирован! ✅\n\nПри каждом входе в приложение необходимо:\n\n• Зайти в чат → Отправить свой никнейм → Ввести код-пароль\n\n• Приложение автоматически разрешит доступ ко всем вкладкам.";
 const PAYSTAT=["ИП","Самозанятость","Физическое лицо"];
 const PAYSYS_OTHER=["Банковская карта","ЮMoney"];
 const PAYSYS_IP="Расчетный счет";
@@ -475,6 +479,10 @@ function fmtAgo(ts){if(!ts)return"Без заявок";
  if(diff<=0)return"Новая заявка";
  return"Без заявок ("+diff+" дн)"}
 function gen(){codes=codes.filter(c=>c.o!=cur);codes.push({c:Math.random().toString(36).slice(2,6).toUpperCase()+"-"+Math.random().toString(36).slice(2,6).toUpperCase(),o:cur,ts:Date.now()});render()}
+// При переходе в "Частые вопросы" (и при переключении внутренних подвкладок "Вознаграждение"/"Партнеры")
+// прокручиваем область текста #cl в начало - иначе после render() она может остаться на той позиции скролла,
+// где была в прошлый раз (например, в самом низу), и партнер начинает читать не с начала текста.
+function scrollFaqTop(){try{const el=document.getElementById("cl");if(el)el.scrollTop=0}catch(e){}}
 function send(){
  const u=U[cur];let v=$("in").value.trim();if(!v)return;if(u.on)v=cap(v);u.msgs.push({t:v,me:1});u.err="";
  if(!u.on){
@@ -596,6 +604,7 @@ function gate(u){
  <input id="rf" placeholder="Сфера деятельности" value="${esc(u.rfVal||"")}" class="${u.errField?"err-field":""}" oninput="U['${u.id}'].rfVal=this.value" onblur="this.value=cap(this.value);U['${u.id}'].rfVal=this.value"><div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errField||"")}</div>
  <button class="p" onclick="doReg()">Зарегистрироваться</button></div>`;
  if(!u.codeOk)return steps(u)+`<div class="c"><b>Активация профиля</b><p class="mu">Введите код приглашения от администратора или партнера.</p>
+ ${(DB&&!_firstSyncApplied)?'<p class="mu" style="color:#c0392b">⚠️ Нет связи с общей базой данных — код администратора/партнера может не дойти до этого устройства. Проверьте интернет-соединение и перезайдите в приложение. Если это повторяется на новых устройствах — сообщите администратору.</p>':''}
  <input id="ac" placeholder="XXXX-XXXX" onkeydown="if(event.key=='Enter')act()"><div class="mu" style="color:#c0392b">${esc(u.err)}</div><button class="p" style="margin-top:16px" onclick="act()">Отправить</button></div>`;
  return steps(u)+`<div class="c" style="text-align:center"><b>${u.pinStage=="enter"?"Придумайте код-пароль":"Повторите код-пароль"}</b>
  <p class="mu">${u.pinStage=="enter"?"4 цифры для входа в приложение":"Введите код-пароль еще раз для подтверждения"}</p>
@@ -616,7 +625,7 @@ function doReg(){const u=U[cur],nk=$("rn").value.trim(),nm=$("rm").value.trim(),
  u.nick=nk[0]=="@"?nk:"@"+nk;u.name=nm;u.fld=fl;u.reg=true;u.rnVal="";u.rmVal="";u.rfVal="";render()}
 function act(){const u=U[cur],m=$("ac").value.trim().match(/^(\S+)$/i),k=m?codes.findIndex(x=>x.c==m[1].toUpperCase()):-1;
  if(k<0){u.err="Неверная команда или код уже использован.";return render()}
- if(codes[k].ts&&(Date.now()-codes[k].ts)>5*60*1000){codes.splice(k,1);u.err="Код устарел, просьба ввести новый код активации.";return render()}
+ if(codes[k].ts&&(Date.now()-codes[k].ts)>CODE_TTL_MS){codes.splice(k,1);u.err="Код устарел, просьба ввести новый код активации.";return render()}
  u.inv=codes[k].o;codes.splice(k,1);u.err="";u.codeOk=true;render()}
 function wdStage1(u){
  return `<div class="c"><b>Вывод средств</b>
@@ -688,12 +697,12 @@ function chat(u){
  </div>`;
  const extra=`<div class="r" style="margin-top:8px">
  <button style="flex:1" class="${u.activeChat=="admin"?"p":""}" onclick="U['${u.id}'].activeChat='admin';render()">🆘 Поддержка${bdg(unreadWith(u,"admin"))}</button>
- <button style="flex:1" class="${u.activeChat=="faq"?"p":""}" onclick="U['${u.id}'].activeChat='faq';render()">❓ Частые вопросы</button>
+ <button style="flex:1" class="${u.activeChat=="faq"?"p":""}" onclick="U['${u.id}'].activeChat='faq';render();scrollFaqTop()">❓ Частые вопросы</button>
  </div>`;
  if(u.activeChat=="faq"){
   return `<div style="display:flex;flex-direction:column;height:100%">${switcher}<div class="faqtabs">
- <button class="${(u.faqTab||"reward")=="reward"?"p":""}" onclick="U['${u.id}'].faqTab='reward';render()">Вознаграждение</button>
- <button class="${u.faqTab=="partners"?"p":""}" onclick="U['${u.id}'].faqTab='partners';render()">Партнеры</button>
+ <button class="${(u.faqTab||"reward")=="reward"?"p":""}" onclick="U['${u.id}'].faqTab='reward';render();scrollFaqTop()">Вознаграждение</button>
+ <button class="${u.faqTab=="partners"?"p":""}" onclick="U['${u.id}'].faqTab='partners';render();scrollFaqTop()">Партнеры</button>
  </div>
  <div id="cl" style="flex:1;overflow-y:auto">${u.faqTab=="partners"?FAQ_PARTNER:FAQ_REWARD}</div>${extra}</div>`;
  }

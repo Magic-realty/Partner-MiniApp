@@ -95,6 +95,20 @@ function syncAppHeight(){
   const h=(TG&&TG.viewportStableHeight)||(TG&&TG.viewportHeight)||(window.visualViewport&&window.visualViewport.height)||window.innerHeight;
   document.documentElement.style.setProperty("--app-h",h+"px");
  }catch(e){}
+ // Пересчет высоты .frame (строка выше) сдвигает весь макет на экране, в том числе активное поле ввода.
+ // На iOS мигающий курсор отрисовывается браузером как отдельный слой поверх страницы и привязывается к
+ // координате поля В МОМЕНТ последней перерисовки курсора - если макет сдвигается ПОСЛЕ этого (например, когда
+ // открывается клавиатура и меняется высота .frame), курсор может остаться на старой координате экрана и
+ // визуально оказаться на другом элементе (кнопке, соседнем поле), хотя реальный фокус остается в нужном поле.
+ // Принудительно переустанавливаем выделение (это не теряет фокус и не закрывает клавиатуру) - это заставляет
+ // WebKit пересчитать и перерисовать курсор уже на правильной, актуальной координате поля.
+ try{
+  const ae=document.activeElement;
+  if(ae&&(ae.tagName==="INPUT"||ae.tagName==="TEXTAREA")&&typeof ae.setSelectionRange==="function"&&typeof ae.selectionStart==="number"){
+   const s=ae.selectionStart,e2=ae.selectionEnd;
+   requestAnimationFrame(()=>{try{ae.setSelectionRange(s,e2)}catch(err){}});
+  }
+ }catch(e){}
 }
 syncAppHeight();
 // Повторные догоняющие вызовы сразу после загрузки: TG.expand() разворачивает окно с анимацией длительностью
@@ -401,7 +415,17 @@ try{
    // фокуса, и визуально остается там же, пока страница плавно скроллится под ним, из-за чего курсор оказывается
    // на соседнем элементе (например, на кнопке под полем). Мгновенный (без анимации) скролл выполняется одним
    // кадром, поэтому курсор и поле всегда двигаются синхронно.
-   setTimeout(()=>{try{t.scrollIntoView&&t.scrollIntoView({block:"nearest"})}catch(err){}},50);
+   setTimeout(()=>{
+    try{t.scrollIntoView&&t.scrollIntoView({block:"nearest"})}catch(err){}
+    // После скролла принудительно переустанавливаем выделение в поле - та же мера, что и в syncAppHeight(),
+    // чтобы курсор точно перерисовался на новой, актуальной позиции поля, а не остался на старой координате.
+    try{
+     if((tag==="INPUT"||tag==="TEXTAREA")&&typeof t.setSelectionRange==="function"&&typeof t.selectionStart==="number"){
+      const s=t.selectionStart,e2=t.selectionEnd;
+      requestAnimationFrame(()=>{try{t.setSelectionRange(s,e2)}catch(err){}});
+     }
+    }catch(err){}
+   },50);
   }
  });
 }catch(e){}

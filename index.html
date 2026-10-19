@@ -202,6 +202,9 @@ const SERVICES_INFO=[
 const MAIN=["Ждем подтверждения клиента","Первый контакт состоялся","Договорились о встрече","Условия согласованы","Принят в работу","Активная работа","Задаток принят","Договор подписан","Документы на регистрации","Сделка состоялась"];
 const PAUSE=["Не отвечает","Думает","Отказ"];
 const rub=n=>Math.round(n).toLocaleString("ru-RU")+" ₽";
+// Компактный формат суммы в тысячах (200к / 650к / 1 200к) - используется там, где нужно быстро окинуть взглядом
+// много сумм подряд (например, список запросов на вывод в админке), не читая каждую сумму целиком по разрядам.
+const fmtK=n=>Math.round((n||0)/1000).toLocaleString("ru-RU")+"к";
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const $=i=>document.getElementById(i);
 const mk=(id,nick,on,inv)=>({id,nick,on,inv,reg:!!nick,codeOk:!!on,pinStage:"enter",pinBuf:"",pinFirst:null,pinResult:null,name:"",fld:"",bal:0,lim:TIERS.map(t=>t.base),msgs:[],tab:"Профиль",form:false,err:"",
@@ -362,6 +365,23 @@ function buildPhone(d){
  if(r.length>8)out+=r.slice(8,10);
  return out}
 function fmtPhone(el){let d=el.value.replace(/\D/g,"");if(d[0]=="8")d="7"+d.slice(1);if(d[0]&&d[0]!="7")d="7"+d;d=d.slice(0,11);el.value=buildPhone(d)}
+// Вставка скопированного номера телефона обрабатывается ОТДЕЛЬНО от обычного ввода: поле при получении фокуса
+// автоматически подставляет "+7" (если оно было пустым, см. onfocus на самом поле), и если не перехватить вставку
+// отдельно, вставленный номер просто ДОПИСЫВАЛСЯ бы после уже стоящего "+7" (а не заменял его), и номер, начинающийся
+// с 8 или с 7, из-за этого съезжал/обрезался и становился неверным. Здесь текст из буфера обмена разбирается с
+// нуля (не используется то, что уже было в поле), поэтому результат всегда верный независимо от того, что уже
+// было в поле и с какой цифры (7 или 8) скопирован номер.
+function phonePaste(e,el,id){
+ e.preventDefault();
+ let text="";
+ try{text=(e.clipboardData||window.clipboardData).getData("text")}catch(err){}
+ let d=text.replace(/\D/g,"");
+ if(d[0]=="8")d="7"+d.slice(1);
+ if(d[0]&&d[0]!="7")d="7"+d;
+ d=d.slice(0,11);
+ el.value=buildPhone(d);
+ if(U[id])U[id].lp=el.value;
+}
 function phoneKeyDown(e,el,id){
  if(e.key!=="Backspace")return;
  e.preventDefault();
@@ -764,7 +784,7 @@ function req(u){
  }
  const f=u.form?`<div class="c" style="position:relative"><button onclick="U['${u.id}'].form=false;render()" style="position:absolute;top:8px;right:8px;width:28px;height:28px;padding:0;border-radius:50%;line-height:1" aria-label="Закрыть">✕</button><b>Новая заявка</b>
  <input id="f" style="margin-top:14px" placeholder="ФИО" value="${esc(u.lf||"")}" class="${u.errFio?"err-field":""}" oninput="U['${u.id}'].lf=this.value" onblur="this.value=cap(this.value);U['${u.id}'].lf=this.value"><div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errFio||"")}</div>
- <input id="p" placeholder="+7(999)999-99-99" value="${esc(u.lp||"")}" class="${u.errPhone?"err-field":""}" oninput="fmtPhone(this);U['${u.id}'].lp=this.value" onkeydown="phoneKeyDown(event,this,'${u.id}')" onfocus="if(!this.value)this.value='+7'"><div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errPhone||"")}</div>
+ <input id="p" placeholder="+7(999)999-99-99" value="${esc(u.lp||"")}" class="${u.errPhone?"err-field":""}" oninput="fmtPhone(this);U['${u.id}'].lp=this.value" onkeydown="phoneKeyDown(event,this,'${u.id}')" onpaste="phonePaste(event,this,'${u.id}')" onfocus="if(!this.value)this.value='+7'"><div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errPhone||"")}</div>
  <div style="font-weight:600;margin-top:6px;margin-bottom:2px;display:flex;align-items:center;gap:6px">Выберите услугу<button type="button" class="qbtn" onclick="U['${u.id}'].svInfo=true;render()" aria-label="Описание услуг">?</button></div><select id="s" onchange="U['${u.id}'].ls=this.value">${SV.map(s=>`<option ${s==(u.ls||SV[0])?"selected":""}>${s}</option>`).join("")}</select>
  <div style="font-weight:600;margin-top:6px;margin-bottom:2px">Комментарий</div><textarea id="cm" rows=2 placeholder="Почему клиент заинтересован?" class="${u.errComment?"err-field":""}" oninput="U['${u.id}'].lcm=this.value" onblur="this.value=cap(this.value);U['${u.id}'].lcm=this.value">${esc(u.lcm||"")}</textarea><div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errComment||"")}</div>
  <div class="mu" style="margin-top:6px">Первый контакт:</div>
@@ -920,7 +940,7 @@ function admWdView(){
  </div>`:"";
   return `<div class="c" style="cursor:pointer" onclick="wdSetOpen(${i})">
  <div style="font-weight:600">${o.nick}${o.on?"":" ⏳"} <span class="mu">· ${rub(x.s)}</span></div>
- <div class="mu">${esc(o.name)||"—"} · ${esc(o.fld)||"—"} · от ${inv}</div>
+ <div class="mu">${esc(o.name)||"—"} · ${esc(o.fld)||"—"} · от ${inv} · Баланс: ${fmtK(o.bal)}</div>
  <div style="margin-top:4px">${tag(x)}</div>
  ${details}
  </div>`}).join("")||'<div class="mu">Нет запросов</div>';

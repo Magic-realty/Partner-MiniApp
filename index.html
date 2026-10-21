@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="ru"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Партнерка: Telegram Mini App (прототип)</title>
 <style>
 :root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#dfe6ee;--card:#fff;--tx:#17212b;--mu:#707d8a;--ac:#2481cc;--bd:#e1e6eb;--ok:#15803d;--me:#e3f2fd;--bot:#fff}
@@ -92,7 +92,24 @@ try{if(IS_IN_TELEGRAM){const dp=document.getElementById("demoPanel");if(dp)dp.st
 // веб-запасной вариант (iOS Safari/WebView и обычные браузеры), если приложение открыто не в Telegram.
 function syncAppHeight(){
  try{
-  const h=(TG&&TG.viewportStableHeight)||(TG&&TG.viewportHeight)||(window.visualViewport&&window.visualViewport.height)||window.innerHeight;
+  const ae0=document.activeElement,tag0=ae0&&ae0.tagName,fieldFocused=tag0==="INPUT"||tag0==="TEXTAREA"||tag0==="SELECT";
+  let h;
+  if(fieldFocused){
+   // Пока активно поле ввода (клавиатура, скорее всего, открыта): на разных телефонах и версиях Telegram
+   // по-разному обновляется "их" значение высоты - на части устройств TG.viewportHeight/viewportStableHeight
+   // вообще не учитывает открытую клавиатуру и остается равным полноэкранной высоте, из-за чего нижняя навигация
+   // и кнопки формы оказываются под клавиатурой, хотя visualViewport.height/window.innerHeight на этом же
+   // устройстве клавиатуру уже учли и уменьшились. Поэтому здесь берем МИНИМАЛЬНОЕ из всех доступных значений -
+   // любое значение, которое учитывает клавиатуру, будет меньше того, что её не учитывает, так что минимум
+   // гарантированно не меньше реальной видимой области экрана ни на одном устройстве.
+   const cs=[TG&&TG.viewportStableHeight,TG&&TG.viewportHeight,window.visualViewport&&window.visualViewport.height,window.innerHeight].filter(v=>typeof v==="number"&&v>0);
+   h=cs.length?Math.min.apply(Math,cs):window.innerHeight;
+  }else{
+   // Поле не в фокусе (обычный просмотр, не ввод текста): используется прежний порядок приоритета, где
+   // "устоявшееся" значение Telegram (viewportStableHeight) идет первым, чтобы не дергаться во время анимации
+   // разворачивания окна (TG.expand()) сразу после запуска - см. комментарий выше про старт анимации.
+   h=(TG&&TG.viewportStableHeight)||(TG&&TG.viewportHeight)||(window.visualViewport&&window.visualViewport.height)||window.innerHeight;
+  }
   document.documentElement.style.setProperty("--app-h",h+"px");
  }catch(e){}
  // Пересчет высоты .frame (строка выше) сдвигает весь макет на экране, в том числе активное поле ввода.
@@ -442,6 +459,11 @@ try{
  document.addEventListener("focusin",e=>{
   const t=e.target,tag=t&&t.tagName;
   if(tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT"){
+   // Переключаем высоту .frame в режим "поле в фокусе" (минимум из всех источников - см. syncAppHeight()) сразу
+   // при получении фокуса, и еще раз через небольшие задержки, пока открывается клавиатура (ее анимация появления
+   // занимает какое-то время, и visualViewport/innerHeight могут обновиться не мгновенно).
+   syncAppHeight();
+   [100,250,400].forEach(ms=>{try{setTimeout(syncAppHeight,ms)}catch(err){}});
    // behavior:"smooth" умышленно не используется: анимированный (плавный) скролл, выполняемый ПОСЛЕ того как
    // поле уже получило фокус, в мобильных WebView (особенно iOS) может разъединить отрисовку мигающего курсора
    // от реальной позиции поля на экране - курсор "застывает" на той координате экрана, где поле было в момент
@@ -459,6 +481,16 @@ try{
      }
     }catch(err){}
    },50);
+  }
+ });
+}catch(e){}
+// Когда поле теряет фокус (клавиатура закрывается), возвращаем .frame в обычный режим расчета высоты -
+// с небольшой задержкой, чтобы клавиатура успела анимированно скрыться и итоговая высота была точной.
+try{
+ document.addEventListener("focusout",e=>{
+  const tag=e.target&&e.target.tagName;
+  if(tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT"){
+   [50,200,350].forEach(ms=>{try{setTimeout(syncAppHeight,ms)}catch(err){}});
   }
  });
 }catch(e){}

@@ -77,7 +77,7 @@ input[type=number]{-moz-appearance:textfield}
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-database-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-auth-compat.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/lib/browser.min.js"></script>
 <script>
 const TG=window.Telegram&&window.Telegram.WebApp;try{TG&&(TG.ready(),TG.expand())}catch(e){}
 // --- Видимость демо-панели: скрыта для ВСЕХ внутри Telegram (без исключений), видна только в обычном браузере/артефакте ---
@@ -542,9 +542,10 @@ function svInfoModal(u){
  <div class="mbd">${SERVICES_INFO.map(([n,d])=>{const open=!!(u.svOpen&&u.svOpen[n]);return `<div class="svq"><div class="svq-h${open?" open":""}" onclick="toggleSvInfo('${u.id}','${n.replace(/'/g,"\\'")}')">${esc(n)}<span class="chev">▾</span></div>${open?`<div class="svq-b">${esc(d)}</div>`:""}</div>`}).join("")}</div>
  </div></div>`}
 function chatLocked(u){
- if(u.lockStage=="nick")return `<div style="display:flex;flex-direction:column;height:100%"><div id="cl" style="flex:1;overflow-y:auto"></div>
- <div class="r" style="margin-top:6px"><input id="lkn" placeholder="Сообщение" onkeydown="if(event.key=='Enter')lockNickSubmit()"><button class="p" onclick="lockNickSubmit()">➤</button></div>
- <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.lockErr||"")}</div></div>`;
+ if(u.lockStage=="nick")return `<div style="display:flex;flex-direction:column;height:100%">
+ <div class="r" style="margin-top:0"><input id="lkn" placeholder="Сообщение" onkeydown="if(event.key=='Enter')lockNickSubmit()"><button class="p" onclick="lockNickSubmit()">➤</button></div>
+ <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.lockErr||"")}</div>
+ <div id="cl" style="flex:1;overflow-y:auto"></div></div>`;
  return `<div style="display:flex;flex-direction:column;height:100%"><div id="cl" style="flex:1;overflow-y:auto"></div>
  <div class="c" style="text-align:center;margin-top:8px"><b>Введите пароль</b>
  <div class="pin">${[0,1,2,3].map(i=>`<span class="${u.lockPinBuf.length>i?"f":""}"></span>`).join("")}</div>

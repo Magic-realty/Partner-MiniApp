@@ -77,6 +77,7 @@ input[type=number]{-moz-appearance:textfield}
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-database-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-auth-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <script>
 const TG=window.Telegram&&window.Telegram.WebApp;try{TG&&(TG.ready(),TG.expand())}catch(e){}
 // --- Видимость демо-панели: скрыта для ВСЕХ внутри Telegram (без исключений), видна только в обычном браузере/артефакте ---
@@ -368,6 +369,19 @@ function cp(t){
  const ok=()=>{_copiedCodes[t]=true;render();setTimeout(()=>{delete _copiedCodes[t];render()},1500)};
  try{navigator.clipboard.writeText(t).then(ok,()=>fb())}catch(e){fb()}
  function fb(){const x=document.createElement("textarea");x.value=t;document.body.appendChild(x);x.select();try{document.execCommand("copy")}catch(e){}x.remove();ok()}
+}
+// QR-код - дополнительный способ передать код приглашения, когда партнеры рядом физически (отсканировать
+// вместо того, чтобы диктовать/печатать код вручную). QR кодирует тот же самый текст кода, что и кнопка
+// "Копировать" - реферал в любом случае закрепляется за тем, кто код создал (codes[].o), независимо от
+// способа передачи (QR или копирование текста), т.к. это один и тот же код.
+function toggleQR(code){const u=U[cur];u.qrOpen=u.qrOpen==code?null:code;render()}
+function renderQR(){
+ try{
+  const u=U[cur],cv=$("qrcv");
+  if(!cv||!u||!u.qrOpen)return;
+  if(typeof QRCode==="undefined"){fbDbg("библиотека QR не загрузилась");return}
+  QRCode.toCanvas(cv,u.qrOpen,{width:200,margin:1},function(err){});
+ }catch(e){}
 }
 function buildPhone(d){
  if(!d)return"";
@@ -665,6 +679,7 @@ function render(){
  $("modal").innerHTML=u.svInfo?svInfoModal(u):"";
  const c=$("cl");if(c)c.scrollTop=c.scrollHeight;
  if(u.errFocus){const el=$(u.errFocus);if(el){el.focus();if(el.select)el.select()}u.errFocus=null}
+ renderQR();
  if(!_applyingRemote)scheduleSync()}
 function steps(u){const a=["Регистрация","Активация","Обучение","Работа"],k=!u.reg?0:!u.on?1:u.msgs.some(m=>m.b)?2:3;return `<div class="st">${a.map((x,i)=>`<span class="${i==k?"on":i<k?"dn":""}">${i<k?"✓ ":""}${x}</span>`).join("")}</div>`}
 function gate(u){
@@ -864,7 +879,7 @@ function prt(u){
  const ps=Object.values(U).filter(x=>x.inv==u.id);
  const rows=ps.map(p=>{const ls=leads.filter(l=>l.o==p.id),d=ls.filter(l=>l.paid).length,b=L.filter(x=>x.to==u.id&&x.from==p.id).reduce((a,x)=>a+x.sum,0),last=ls.length?Math.max(...ls.map(l=>l.ts||0)):0;
  return `<tr style="cursor:pointer" onclick="U['${u.id}'].viewPartner='${p.id}';render()"><td>${p.nick}${p.on?"":" ⏳"}</td><td>${ls.length}</td><td>${d}</td><td>${rub(b)}</td><td class="mu">${fmtAgo(last)}</td></tr>`}).join("");
- return `<div class="c"><b>Пригласить партнера</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Код действует 5 минут после создания.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${my.map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div></div>
+ return `<div class="c"><b>Пригласить партнера</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Код действует 5 минут после создания. Если партнер рядом — покажите ему QR-код для сканирования; если на расстоянии — скопируйте код и отправьте сообщением.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${my.map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button><button class="${u.qrOpen==c.c?"p":""}" onclick="toggleQR('${c.c}')">📷 QR</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div>${u.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><canvas id="qrcv"></canvas><div class="mu" style="margin-top:6px">Партнер сканирует этот QR-код камерой телефона и получает тот же код приглашения</div></div>`:""}</div>
  <div class="c"><b>Мои партнеры</b><p class="mu">Вы получаете 10% с вознаграждения каждого приглашенного партнера, <u>его выплата не уменьшается</u>. Нажмите на партнера, чтобы увидеть статусы его заявок.</p>
  <table><tr><th>Ник</th><th>Заявки</th><th>Сделки</th><th>Ваш бонус</th><th>Активность</th></tr>${rows||'<tr><td colspan=5 class="mu">Пока никого. Создайте код в профиле.</td></tr>'}</table></div>`}
 function adminSupportChat(){
@@ -917,7 +932,7 @@ function admPartnersView(){
  <div class="mu">${esc(p.name)||"—"} · ${esc(p.fld)||"—"} · от ${inv}</div>
  <table style="margin-top:8px"><tr><th>Заявки</th><th>Сделки</th><th>Прибыль</th><th>Реферал</th><th>Активность</th></tr>
  <tr><td>${ls.length}</td><td>${deals.length}</td><td>${rub(profit)}</td><td>${refs}</td><td class="mu">${fmtAgo(last)}</td></tr></table></div>`}).join("")||'<div class="mu">Нет зарегистрированных партнеров</div>';
- return `<div class="c"><b>Коды администратора</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Код действует 5 минут после создания.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${codes.filter(c=>c.o=="admin").map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div></div>
+ return `<div class="c"><b>Коды администратора</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Код действует 5 минут после создания. Если партнер рядом — покажите ему QR-код для сканирования; если на расстоянии — скопируйте код и отправьте сообщением.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${codes.filter(c=>c.o=="admin").map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button><button class="${U.admin.qrOpen==c.c?"p":""}" onclick="toggleQR('${c.c}')">📷 QR</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div>${U.admin.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><canvas id="qrcv"></canvas><div class="mu" style="margin-top:6px">Партнер сканирует этот QR-код камерой телефона и получает тот же код приглашения</div></div>`:""}</div>
  <div class="c"><b style="color:#dc2626">Опасная зона</b><p class="mu">Полностью очищает все тестовые данные: партнеров, заявки, коды, сообщения и запросы на вывод. Используйте только для тестирования.</p><button style="width:100%;${_resetArmed?"background:#dc2626;color:#fff;border-color:#dc2626":"border-color:#dc2626;color:#dc2626"}" onclick="adminResetAll()">${_resetArmed?"⚠️ Нажмите еще раз, чтобы подтвердить":"🗑 Сбросить все тестовые данные"}</button></div>
  ${list}`}
 let _resetArmed=false,_resetArmTimer=null;

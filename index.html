@@ -77,7 +77,7 @@ input[type=number]{-moz-appearance:textfield}
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-database-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-auth-compat.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qr-code-styling@1.9.2/lib/qr-code-styling.min.js"></script>
 <script>
 const TG=window.Telegram&&window.Telegram.WebApp;try{TG&&(TG.ready(),TG.expand())}catch(e){}
 // --- Видимость демо-панели: скрыта для ВСЕХ внутри Telegram (без исключений), видна только в обычном браузере/артефакте ---
@@ -379,9 +379,20 @@ function renderQR(){
  try{
   const u=U[cur],cv=$("qrcv");
   if(!cv||!u||!u.qrOpen)return;
-  if(typeof QRCode==="undefined"){fbDbg("библиотека QR не загрузилась");return}
+  if(typeof QRCodeStyling==="undefined"){
+   fbDbg("библиотека QR не загрузилась");
+   cv.innerHTML=`<div style="padding:16px;font-weight:700;font-size:20px;letter-spacing:1px">${esc(u.qrOpen)}</div>`;
+   return;
+  }
   cv.innerHTML="";
-  new QRCode(cv,{text:u.qrOpen,width:200,height:200,correctLevel:QRCode.CorrectLevel.M});
+  const qr=new QRCodeStyling({
+   width:220,height:220,type:"svg",data:u.qrOpen,margin:8,
+   dotsOptions:{color:"#2481cc",type:"rounded"},
+   backgroundOptions:{color:"#ffffff"},
+   cornersSquareOptions:{color:"#2481cc",type:"extra-rounded"},
+   cornersDotOptions:{color:"#2481cc",type:"dot"}
+  });
+  qr.append(cv);
  }catch(e){fbDbg("ошибка QR: "+e.message)}
 }
 function buildPhone(d){
@@ -693,7 +704,9 @@ function gate(u){
  <button class="p" onclick="doReg()">Зарегистрироваться</button></div>`;
  if(!u.codeOk)return steps(u)+`<div class="c"><b>Активация профиля</b><p class="mu">Введите код приглашения от администратора или партнера.</p>
  ${(DB&&!_firstSyncApplied)?'<p class="mu" style="color:#c0392b">⚠️ Нет связи с общей базой данных — код администратора/партнера может не дойти до этого устройства. Проверьте интернет-соединение и перезайдите в приложение. Если это повторяется на новых устройствах — сообщите администратору.</p>':''}
- <input id="ac" placeholder="XXXX-XXXX" onkeydown="if(event.key=='Enter')act()"><div class="mu" style="color:#c0392b">${esc(u.err)}</div><button class="p" style="margin-top:16px" onclick="act()">Отправить</button></div>`;
+ <input id="ac" placeholder="XXXX-XXXX" onkeydown="if(event.key=='Enter')act()"><div class="mu" style="color:#c0392b">${esc(u.err)}</div>
+ ${(TG&&typeof TG.showScanQrPopup==="function")?'<button type="button" style="width:100%;margin-top:10px" onclick="scanActivationCode()">📷 Открыть камеру и отсканировать QR-код</button>':''}
+ <button class="p" style="margin-top:10px" onclick="act()">Отправить</button></div>`;
  return steps(u)+`<div class="c" style="text-align:center"><b>${u.pinStage=="enter"?"Придумайте код-пароль":"Повторите код-пароль"}</b>
  <p class="mu">${u.pinStage=="enter"?"4 цифры для входа в приложение":"Введите код-пароль еще раз для подтверждения"}</p>
  <div class="pin">${[0,1,2,3].map(i=>`<span class="${u.pinBuf.length>i?"f":""}"></span>`).join("")}</div>
@@ -715,6 +728,24 @@ function act(){const u=U[cur],m=$("ac").value.trim().match(/^(\S+)$/i),k=m?codes
  if(k<0){u.err="Неверная команда или код уже использован.";return render()}
  if(codes[k].ts&&(serverNow()-codes[k].ts)>CODE_TTL_MS){codes.splice(k,1);u.err="Код устарел, просьба ввести новый код активации.";return render()}
  u.inv=codes[k].o;codes.splice(k,1);u.err="";u.codeOk=true;render()}
+// Сканирование QR-кода приглашения камерой устройства - полностью внутри мини-приложения, через
+// нативный Telegram WebApp API (TG.showScanQrPopup), без браузерных разрешений getUserMedia и без
+// сторонних библиотек/сайтов: камеру и сам процесс сканирования показывает интерфейс самого Telegram.
+// QR кодирует обычный текстовый код приглашения (см. invite_code_qr_feature) - сканер никуда не переходит,
+// просто передает распознанный текст обратно в это же поле ввода, как если бы его напечатали руками.
+function scanActivationCode(){
+ if(!(TG&&typeof TG.showScanQrPopup==="function"))return;
+ try{
+  TG.showScanQrPopup({text:"Наведите камеру на QR-код партнера"},function(text){
+   if(text){
+    try{TG.closeScanQrPopup()}catch(e){}
+    const el=$("ac"); // экран мог измениться за время, пока был открыт сканер (например, из-за прихода
+    if(el){el.value=text.trim();act()} // данных синхронизации) - вызываем act() только если поле еще на экране
+   }
+   return true;
+  });
+ }catch(e){}
+}
 function wdStage1(u){
  return `<div class="c"><b>Вывод средств</b>
  <div style="font-weight:600;margin-top:6px;margin-bottom:2px">Ваш статус</div>

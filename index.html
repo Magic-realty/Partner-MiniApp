@@ -18,12 +18,13 @@ body.in-tg,html.in-tg{height:100%;overflow:hidden}
 .modal{width:100%;max-height:74%;background:var(--card);display:flex;flex-direction:column;border-radius:14px;box-shadow:0 8px 28px rgba(0,0,0,.35)}
 .modal .mhd{padding:10px 14px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;font-weight:600}
 .modal .mbd{flex:1;overflow-y:auto;padding:4px 14px}
-.qbtn{width:20px;height:20px;border-radius:50%;padding:0;font-size:12px;line-height:1;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.qbtn{width:20px;height:20px;border-radius:50%;padding:0;font-size:12px;line-height:1;display:inline-flex;align-items:center;justify-content:center;flex:none;border-color:var(--ac);color:var(--ac)}
 .svq{border-bottom:1px solid var(--bd)}
 .svq:last-child{border-bottom:none}
 .svq-h{padding:10px 0;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-weight:600;gap:8px}
-.svq-h .chev{transition:transform .15s;flex:none;color:var(--ac)}
-.svq-h.open .chev{transform:rotate(180deg)}
+.svtbtn{padding:4px 11px;font-size:12px;border-radius:14px;flex:none}
+.svtbtn.cl{background:var(--ac);color:#fff;border-color:var(--ac)}
+.svtbtn.op{background:var(--bg);color:var(--mu);border-color:var(--bd)}
 .svq-b{padding:0 0 10px;color:var(--mu)}
 .hd{background:var(--ac);color:#fff;padding:10px 14px;font-weight:600}
 .body{flex:1;padding:10px;overflow-y:auto;-webkit-overflow-scrolling:touch}
@@ -182,7 +183,7 @@ const REAL_USER_ID=(IS_IN_TELEGRAM&&TG_USER&&TG_USER.id)?(IS_ADMIN_TG_ACCOUNT?"a
 // --- Общая база данных (Firebase Realtime Database): синхронизация заявок, кодов, балансов, выводов и переписки между устройствами ---
 const FIREBASE_CONFIG={apiKey:"AIzaSyAUlnUisb0Kp0LVKcwsjCR0xOELIKSKKmU",authDomain:"partner-miniapp.firebaseapp.com",databaseURL:"https://partner-miniapp-default-rtdb.europe-west1.firebasedatabase.app",projectId:"partner-miniapp",storageBucket:"partner-miniapp.firebasestorage.app",messagingSenderId:"456368165048",appId:"1:456368165048:web:2debc5c039b334fe8da44d"};
 const SYNC_PATH="state";
-let DB=null,_applyingRemote=false,_syncTimer=null,_firstSyncApplied=false,_serverTimeOffset=0;
+let DB=null,_applyingRemote=false,_syncTimer=null,_firstSyncApplied=false,_serverTimeOffset=0,_showLoadingGate=false;
 function fbDbg(t){try{const d=document.getElementById("fbDebug");if(d)d.textContent="FB: "+t}catch(e){}}
 // serverNow() - время, синхронизированное с сервером Firebase, а не с часами конкретного телефона. Код
 // приглашения ставится и проверяется на РАЗНЫХ устройствах (одно создает код, другое его вводит) - если
@@ -229,7 +230,7 @@ const mk=(id,nick,on,inv)=>({id,nick,on,inv,reg:!!nick,codeOk:!!on,pinStage:"ent
  rnVal:"",rmVal:"",rfVal:"",errNick:"",errName:"",errField:"",errFocus:null,
  lf:"",lp:"",ls:SV[0],lcm:"",lw:"",errFio:"",errPhone:"",errComment:"",errContact:"",
  wdForm:false,wdReqForm:false,wdSystem:"",wdStatus:"",wdFields:{},wdSum:"",wdListOpen:false,activeChat:"self",faqTab:"reward",limInfo:false,lastSeen:{},leadView:null,viewPartner:null,
- locked:false,lockStage:"nick",lockPinBuf:"",lockErr:"",svInfo:false,svOpen:{}});
+ locked:false,lockStage:"nick",lockPinBuf:"",lockErr:"",lockPinResult:null,svInfo:false,svOpen:{}});
 const tierLabel=i=>{const t=TIERS[i],fmt=n=>n.toLocaleString("ru-RU");return i==0?`до<br>${fmt(t.max)}`:`от ${fmt(TIERS[i-1].max)}<br>до ${fmt(t.max)}`};
 const cap=s=>s.replace(/(^\s*|[.!?]\s+)([a-zа-яё])/gi,(m,p1,p2)=>p1+p2.toUpperCase());
 const ONB="Профиль успешно активирован! ✅\n\nПри каждом входе в приложение необходимо:\n\n• Зайти в чат → Отправить свой никнейм → Ввести код-пароль\n\n• Приложение автоматически разрешит доступ ко всем вкладкам.";
@@ -264,7 +265,6 @@ const FAQ_REWARD=`<div class="c"><b>Диапазоны и вознагражде
 const FAQ_PARTNER=`<div class="c"><b>Партнерское вознаграждение</b>
 <div class="qa"><b>Кто такие партнеры?</b>Люди, которым вы дали доступ, объяснили принцип работы, ценность и качество оказываемых услуг.</div>
 <div class="qa"><b>Что показывает вкладка «Партнеры»?</b>Всех ваших приглашенных партнеров, а также:<br>• количество переданных заявок партнером;<br>• количество партнерских сделок;<br>• ваш бонус за достижения партнера;<br>• активность партнера;<br>• актуальные лимиты партнера по категориям.</div>
-<div class="qa"><b>Мой бонус за достижения партнера?</b><u>Ваш бонус</u> 10% от фактического лимита партнера с каждой его сделки. Вознаграждение партнера <u>не уменьшается</u>.</div>
 </div>
 <div class="c"><b>Частые вопросы по партнерскому вознаграждению</b>
 <div class="qa"><b>❓ Какое вознаграждение я получу за сделку партнера?</b>Партнер получает +10% к своему лимиту за сделку в диапазоне, а вы получаете бонус 10% от его фактического лимита, его выплата не уменьшается.<br><br>
@@ -277,7 +277,7 @@ const FAQ_PARTNER=`<div class="c"><b>Партнерское вознагражд
 <div class="qa"><b>❓ Как быстро происходит выплата?</b>После статуса «Сделка состоялась» в заявке партнера, средства поступают на ваш баланс в течение 3–7 дней (в течение 1 суток при максимальном лимите хотя бы в одной категории).</div>
 <div class="qa"><b>❓ Как получить выплату?</b>«Профиль» → «Вывести средства» → способ получения → заполнить форму → указать сумму → «Подтвердить». Срок зачисления средств — от 10 минут до 3 дней в зависимости от способа.</div>
 </div>`;
-let U={admin:{id:"admin",nick:"@admin",activeChat:null,pairChat:null,chatSub:"support",tab:"Чаты",viewPartner:null,lastSeen:{},pin:null,pinStage:"enter",pinBuf:"",pinFirst:null,pinResult:null,err:"",locked:false,lockStage:"nick",lockPinBuf:"",lockErr:""},p1:mk("p1","@alexey",true,"admin")},codes=[{c:"START-0001",o:"admin"}],leads=[],wd=[],L=[],dm=[],cur="p2",n=2;
+let U={admin:{id:"admin",nick:"@admin",activeChat:null,pairChat:null,chatSub:"support",tab:"Чаты",viewPartner:null,lastSeen:{},pin:null,pinStage:"enter",pinBuf:"",pinFirst:null,pinResult:null,err:"",locked:false,lockStage:"nick",lockPinBuf:"",lockErr:"",lockPinResult:null},p1:mk("p1","@alexey",true,"admin")},codes=[{c:"START-0001",o:"admin"}],leads=[],wd=[],L=[],dm=[],cur="p2",n=2;
 U.p2=mk("p2","",false,null);U.p1.msgs.push({t:ONB,b:1,ts:Date.now()});
 if(REAL_USER_ID){
  // авто-вход: админ -> админ-панель; реальный партнер в Telegram -> его собственный аккаунт по стабильному tg-id (не p2!)
@@ -331,6 +331,24 @@ function scheduleSync(){
  },400);
 }
 if(DB){
+ // До прихода первого реального снимка данных из базы локальный объект U содержит только "заготовку по
+ // умолчанию" (mk()) для реального Telegram-партнера, у админа - pin:null - то есть ДО синхронизации
+ // локальное состояние выглядит как "совершенно новый, незарегистрированный" пользователь, даже если на
+ // самом деле он уже давно зарегистрирован/активирован. Раньше render() сразу показывал экран по этому
+ // ЛОЖНОМУ состоянию (напр. "Придумайте код-пароль" у админа или форму регистрации у партнера), и только
+ // когда данные из базы наконец приходили (обычно доли секунды, но на плохой связи - дольше), экран резко
+ // переключался на правильный (экран блокировки, ввод ника) - отсюда и "неправильный экран раньше нужного"/
+ // заметная задержка между экранами при каждом возврате в свернутое/перезагруженное приложение. Исправлено:
+ // пока ответ от базы не получен, показывается нейтральный экран-заглушка "Загрузка..." (см. render()) -
+ // никакой из специфичных для конкретного состояния экранов не рендерится заранее. Это НЕ влияет на защиту
+ // от перезаписи данных (scheduleSync() как и раньше блокируется до _firstSyncApplied отдельным флагом) -
+ // затронуто только то, что показывается на экране, а не что может быть отправлено в базу.
+ _showLoadingGate=true;
+ // Страховка на случай медленной/плохой связи: если ответ от базы не пришел за 6 секунд, не держим
+ // пользователя на экране "Загрузка..." бесконечно - показываем локальное состояние как есть (как если
+ // бы базы не было вовсе, см. graceful_fallback). Если ответ все же придет позже - он все равно будет
+ // корректно применен обычным путем (правильные данные и правильный экран блокировки заменят локальные).
+ setTimeout(()=>{if(_showLoadingGate){_showLoadingGate=false;render()}},6000);
  try{
   DB.ref(SYNC_PATH).on("value",snap=>{
    fbDbg("получены данные ✓ ("+new Date().toLocaleTimeString()+")");
@@ -340,6 +358,7 @@ if(DB){
     // --- Автоблокировка при входе: начиная со следующего запуска приложения после регистрации/активации, партнер должен ввести ник+пароль при каждом новом входе. Срабатывает один раз за сессию, в момент первого получения данных из базы — а не при каждом последующем обновлении (иначе экран блокировки появлялся бы при любом чужом изменении данных). ---
     if(!_firstSyncApplied){
      _firstSyncApplied=true;
+     _showLoadingGate=false;
      const u0=U[cur];
      // Готов к блокировке: у партнера - после активации (on=true), у админа - после того как он хоть раз задал код-пароль (pin).
      const ready0=u0&&(u0.id==="admin"?!!u0.pin:u0.on);
@@ -348,8 +367,8 @@ if(DB){
     render();
    }catch(e){}
    _applyingRemote=false;
-  },err=>{fbDbg("ОШИБКА ПОДПИСКИ: "+(err&&err.code||err&&err.message||err))});
- }catch(e){fbDbg("ошибка подписки (catch): "+(e&&e.message||e))}
+  },err=>{fbDbg("ОШИБКА ПОДПИСКИ: "+(err&&err.code||err&&err.message||err));_showLoadingGate=false;render()});
+ }catch(e){fbDbg("ошибка подписки (catch): "+(e&&e.message||e));_showLoadingGate=false}
 }
 const tier=p=>{const i=TIERS.findIndex(t=>p<t.max);return i<0?TIERS.length-1:i};
 const bot=(u,t,b)=>U[u].msgs.push({t,b,ts:Date.now()});
@@ -533,25 +552,25 @@ function lockNickSubmit(){const u=U[cur];const v=($("lkn")?$("lkn").value:"").tr
  const norm=s=>s.replace(/^@/,"").toLowerCase();
  if(!v||norm(v)!==norm(u.nick)){u.lockErr="Ник не совпадает. Попробуйте снова.";return render()}
  u.lockErr="";u.lockStage="pin";u.lockPinBuf="";render()}
-function lockPinTap(n){const u=U[cur];if(u.lockPinBuf.length>=4)return;u.lockPinBuf+=n;u.lockErr="";
+function lockPinTap(n){const u=U[cur];if(u.lockPinBuf.length>=4)return;u.lockPinBuf+=n;u.lockErr="";u.lockPinResult=null;
  if(u.lockPinBuf.length==4){
   if(u.lockPinBuf==u.pin){
-   render();
-   setTimeout(()=>{u.locked=false;u.lockStage="nick";u.lockPinBuf="";render()},400);
+   u.lockPinResult="ok";render();
+   setTimeout(()=>{u.locked=false;u.lockStage="nick";u.lockPinBuf="";u.lockPinResult=null;render()},400);
    return;
   }else{
-   render();
-   setTimeout(()=>{u.lockErr="Неверный пароль. Попробуйте снова.";u.lockPinBuf="";render()},500);
+   u.lockPinResult="err";render();
+   setTimeout(()=>{u.lockErr="Неверный пароль. Попробуйте снова.";u.lockPinBuf="";u.lockPinResult=null;render()},500);
    return;
   }
  }
  render()}
-function lockPinDel(){const u=U[cur];u.lockPinBuf=u.lockPinBuf.slice(0,-1);render()}
+function lockPinDel(){const u=U[cur];u.lockPinBuf=u.lockPinBuf.slice(0,-1);u.lockPinResult=null;render()}
 function toggleSvInfo(uid,name){const u=U[uid];u.svOpen=u.svOpen||{};u.svOpen[name]=!u.svOpen[name];render()}
 function svInfoModal(u){
  return `<div class="modal-backdrop"><div class="modal">
  <div class="mhd"><b>Описание услуг</b><button onclick="U['${u.id}'].svInfo=false;render()" style="width:28px;height:28px;padding:0;border-radius:50%;line-height:1" aria-label="Закрыть">✕</button></div>
- <div class="mbd">${SERVICES_INFO.map(([n,d])=>{const open=!!(u.svOpen&&u.svOpen[n]);return `<div class="svq"><div class="svq-h${open?" open":""}" onclick="toggleSvInfo('${u.id}','${n.replace(/'/g,"\\'")}')">${esc(n)}<span class="chev">▾</span></div>${open?`<div class="svq-b">${esc(d)}</div>`:""}</div>`}).join("")}</div>
+ <div class="mbd">${SERVICES_INFO.map(([n,d])=>{const open=!!(u.svOpen&&u.svOpen[n]);return `<div class="svq"><div class="svq-h${open?" open":""}" onclick="toggleSvInfo('${u.id}','${n.replace(/'/g,"\\'")}')">${esc(n)}<button type="button" class="svtbtn ${open?"op":"cl"}" onclick="event.stopPropagation();toggleSvInfo('${u.id}','${n.replace(/'/g,"\\'")}')">${open?"Свернуть":"Открыть"}</button></div>${open?`<div class="svq-b">${esc(d)}</div>`:""}</div>`}).join("")}</div>
  </div></div>`}
 function chatLocked(u){
  if(u.lockStage=="nick")return `<div style="display:flex;flex-direction:column;height:100%">
@@ -562,7 +581,7 @@ function chatLocked(u){
  <div class="c" style="text-align:center;margin-top:0"><b>Введите пароль</b>
  <div class="pin">${[0,1,2,3].map(i=>`<span class="${u.lockPinBuf.length>i?"f":""}"></span>`).join("")}</div>
  <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.lockErr||"")}</div>
- <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button onclick="lockPinTap('${n}')">${n}</button>`).join("")}<button class="stat" disabled></button><button onclick="lockPinTap('0')">0</button><button onclick="lockPinDel()">⌫</button></div></div>
+ <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button onclick="lockPinTap('${n}')">${n}</button>`).join("")}<button class="stat ${u.lockPinResult||""}" disabled>${u.lockPinResult=="ok"?"✓":u.lockPinResult=="err"?"✕":""}</button><button onclick="lockPinTap('0')">0</button><button onclick="lockPinDel()">⌫</button></div></div>
  <div id="cl" style="flex:1;overflow-y:auto"></div></div>`}
 function stColor(st){
  if(["Ждем подтверждения клиента","Первый контакт состоялся","Договорились о встрече","Не отвечает"].includes(st))return"st-grey";
@@ -680,6 +699,16 @@ function askPartner(){const u=U[cur];if(!(u.inv&&u.inv!="admin"))return;
  u.wdForm=false;u.activeChat=u.inv;u.tab="Чаты";render()}
 function tab(t){U[cur].tab=t;render()}
 function render(){
+ if(_showLoadingGate){
+  // Пока не пришел первый ответ от базы - не показываем вообще никакой экран, зависящий от состояния
+  // пользователя (регистрация/активация/код-пароль/обычный интерфейс), чтобы не мигнуть неверным экраном
+  // раньше нужного (см. комментарий у _showLoadingGate выше).
+  $("hd").textContent="Загрузка...";
+  $("nv").innerHTML="";
+  $("bd").innerHTML='<div class="c" style="text-align:center;padding:48px 10px"><div class="mu">Синхронизация с сервером…</div></div>';
+  $("modal").innerHTML="";
+  return;
+ }
  $("who").innerHTML=Object.values(U).map(u=>`<option value="${u.id}" ${u.id==cur?"selected":""}>${u.id=="admin"?"Админ":(u.nick||"Новый пользователь")+(u.on?"":" (не активирован)")}</option>`).join("");
  const u=U[cur];$("hd").textContent=u.id=="admin"?"Админ-панель":!u.reg?"Регистрация":!u.on?"Активация":"Партнерка";
  if(u.tab=="Чаты"&&!u.locked){
@@ -705,7 +734,7 @@ function gate(u){
  if(!u.codeOk)return steps(u)+`<div class="c"><b>Активация профиля</b><p class="mu">Введите код приглашения от администратора или партнера.</p>
  ${(DB&&!_firstSyncApplied)?'<p class="mu" style="color:#c0392b">⚠️ Нет связи с общей базой данных — код администратора/партнера может не дойти до этого устройства. Проверьте интернет-соединение и перезайдите в приложение. Если это повторяется на новых устройствах — сообщите администратору.</p>':''}
  <input id="ac" placeholder="XXXX-XXXX" onkeydown="if(event.key=='Enter')act()"><div class="mu" style="color:#c0392b">${esc(u.err)}</div>
- ${(TG&&typeof TG.showScanQrPopup==="function")?'<button type="button" style="width:100%;margin-top:10px" onclick="scanActivationCode()">📷 Открыть камеру и отсканировать QR-код</button>':''}
+ ${(TG&&typeof TG.showScanQrPopup==="function")?'<button type="button" style="width:100%;margin-top:10px" onclick="scanActivationCode()">Открыть камеру</button>':''}
  <button class="p" style="margin-top:10px" onclick="act()">Отправить</button></div>`;
  return steps(u)+`<div class="c" style="text-align:center"><b>${u.pinStage=="enter"?"Придумайте код-пароль":"Повторите код-пароль"}</b>
  <p class="mu">${u.pinStage=="enter"?"4 цифры для входа в приложение":"Введите код-пароль еще раз для подтверждения"}</p>
@@ -800,7 +829,7 @@ function prof(u){
    <span style="line-height:1.3;color:var(--mu)">${t.n}<br><span style="font-size:11px;opacity:.85">${fixed?t.base.toLocaleString("ru-RU")+" фикс":t.base.toLocaleString("ru-RU")+"–"+t.cap.toLocaleString("ru-RU")}</span></span>
    <span style="text-align:right;font-weight:700;font-size:15px;${achieved?"color:#eab308":"color:var(--ok)"}">${rub(u.lim[i])}${grew?' <span style="color:#16a34a">↑</span>':""}${achieved?" 🏆":""}</span>
   </div>
-  ${fixed?"":`<div style="height:5px;border-radius:3px;background:var(--bg);overflow:hidden"><div style="height:100%;width:${pct}%;border-radius:3px;background:${achieved?"#eab308":"var(--ac)"}"></div></div>${achieved?'<span style="font-size:11px;color:#eab308;font-weight:600">Максимум в этой категории достигнут 🏆</span>':`<span class="mu" style="font-size:11px">До максимума в категории: ${rub(t.cap-u.lim[i])}</span>`}`}
+  ${fixed?`<div style="height:5px;border-radius:3px;background:var(--bg);overflow:hidden"><div style="height:100%;width:100%;border-radius:3px;background:#eab308"></div></div><span style="font-size:11px;color:#eab308;font-weight:600">Достигнута максимальная выплата 🎉</span>`:`<div style="height:5px;border-radius:3px;background:var(--bg);overflow:hidden"><div style="height:100%;width:${pct}%;border-radius:3px;background:${achieved?"#eab308":"var(--ac)"}"></div></div>${achieved?'<span style="font-size:11px;color:#eab308;font-weight:600">Максимум в этой категории достигнут 🏆</span>':`<span class="mu" style="font-size:11px">До максимума в категории: ${rub(t.cap-u.lim[i])}</span>`}`}
   </div>`}).join("")}</div>
  <button style="width:100%;margin-top:10px" onclick="U['${u.id}'].limInfo=!U['${u.id}'].limInfo;render()">${u.limInfo?"Скрыть":"ℹ️ Подробнее о вознаграждении"}</button>
  ${u.limInfo?`<div style="margin-top:8px">${FAQ_REWARD}</div>`:""}</div>
@@ -913,7 +942,7 @@ function prt(u){
  const ps=Object.values(U).filter(x=>x.inv==u.id);
  const rows=ps.map(p=>{const ls=leads.filter(l=>l.o==p.id),d=ls.filter(l=>l.paid).length,b=L.filter(x=>x.to==u.id&&x.from==p.id).reduce((a,x)=>a+x.sum,0),last=ls.length?Math.max(...ls.map(l=>l.ts||0)):0;
  return `<tr style="cursor:pointer" onclick="U['${u.id}'].viewPartner='${p.id}';render()"><td>${p.nick}${p.on?"":" ⏳"}</td><td>${ls.length}</td><td>${d}</td><td>${rub(b)}</td><td class="mu">${fmtAgo(last)}</td></tr>`}).join("");
- return `<div class="c"><b>Пригласить партнера</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Код действует 5 минут после создания. Если партнер рядом — покажите ему QR-код для сканирования; если на расстоянии — скопируйте код и отправьте сообщением.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${my.map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button><button class="${u.qrOpen==c.c?"p":""}" onclick="toggleQR('${c.c}')">📷 QR</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div>${u.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><div id="qrcv" style="display:inline-block"></div><div class="mu" style="margin-top:6px">Партнер сканирует этот QR-код камерой телефона и получает тот же код приглашения</div></div>`:""}</div>
+ return `<div class="c"><b>Пригласить партнера</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Если партнер рядом — покажите ему QR-код для сканирования и быстрой регистрации. Код действует 5 минут после создания.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${my.map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button><button class="${u.qrOpen==c.c?"p":""}" onclick="toggleQR('${c.c}')">QR-код</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div>${u.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><div id="qrcv" style="display:inline-block"></div><div class="mu" style="margin-top:6px">Покажите QR-код партнеру</div></div>`:""}</div>
  <div class="c"><b>Мои партнеры</b><p class="mu">Вы получаете 10% с вознаграждения каждого приглашенного партнера, <u>его выплата не уменьшается</u>. Нажмите на партнера, чтобы увидеть статусы его заявок.</p>
  <table><tr><th>Ник</th><th>Заявки</th><th>Сделки</th><th>Ваш бонус</th><th>Активность</th></tr>${rows||'<tr><td colspan=5 class="mu">Пока никого. Создайте код в профиле.</td></tr>'}</table></div>`}
 function adminSupportChat(){
@@ -966,7 +995,7 @@ function admPartnersView(){
  <div class="mu">${esc(p.name)||"—"} · ${esc(p.fld)||"—"} · от ${inv}</div>
  <table style="margin-top:8px"><tr><th>Заявки</th><th>Сделки</th><th>Прибыль</th><th>Реферал</th><th>Активность</th></tr>
  <tr><td>${ls.length}</td><td>${deals.length}</td><td>${rub(profit)}</td><td>${refs}</td><td class="mu">${fmtAgo(last)}</td></tr></table></div>`}).join("")||'<div class="mu">Нет зарегистрированных партнеров</div>';
- return `<div class="c"><b>Коды администратора</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Код действует 5 минут после создания. Если партнер рядом — покажите ему QR-код для сканирования; если на расстоянии — скопируйте код и отправьте сообщением.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${codes.filter(c=>c.o=="admin").map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button><button class="${U.admin.qrOpen==c.c?"p":""}" onclick="toggleQR('${c.c}')">📷 QR</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div>${U.admin.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><div id="qrcv" style="display:inline-block"></div><div class="mu" style="margin-top:6px">Партнер сканирует этот QR-код камерой телефона и получает тот же код приглашения</div></div>`:""}</div>
+ return `<div class="c"><b>Коды администратора</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Если партнер рядом — покажите ему QR-код для сканирования и быстрой регистрации. Код действует 5 минут после создания.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${codes.filter(c=>c.o=="admin").map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button><button class="${U.admin.qrOpen==c.c?"p":""}" onclick="toggleQR('${c.c}')">QR-код</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div>${U.admin.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><div id="qrcv" style="display:inline-block"></div><div class="mu" style="margin-top:6px">Покажите QR-код партнеру</div></div>`:""}</div>
  <div class="c"><b style="color:#dc2626">Опасная зона</b><p class="mu">Полностью очищает все тестовые данные: партнеров, заявки, коды, сообщения и запросы на вывод. Используйте только для тестирования.</p><button style="width:100%;${_resetArmed?"background:#dc2626;color:#fff;border-color:#dc2626":"border-color:#dc2626;color:#dc2626"}" onclick="adminResetAll()">${_resetArmed?"⚠️ Нажмите еще раз, чтобы подтвердить":"🗑 Сбросить все тестовые данные"}</button></div>
  ${list}`}
 let _resetArmed=false,_resetArmTimer=null;

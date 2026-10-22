@@ -237,7 +237,8 @@ const mk=(id,nick,on,inv)=>({id,nick,on,inv,reg:!!nick,codeOk:!!on,pinStage:"ent
  rnVal:"",rmVal:"",rfVal:"",errNick:"",errName:"",errField:"",errFocus:null,
  lf:"",lp:"",ls:SV[0],lcm:"",lw:"",errFio:"",errPhone:"",errComment:"",errContact:"",
  wdForm:false,wdReqForm:false,wdSystem:"",wdStatus:"",wdFields:{},wdSum:"",wdListOpen:false,activeChat:"self",faqTab:"reward",limInfo:false,lastSeen:{},leadView:null,viewPartner:null,
- locked:false,lockStage:"nick",lockPinBuf:"",lockErr:"",lockPinResult:null,svInfo:false,svOpen:{}});
+ locked:false,lockStage:"nick",lockPinBuf:"",lockErr:"",lockPinResult:null,svInfo:false,svOpen:{},
+ pinAttempts:0,blocked:false,blockedChatOpen:false});
 const tierLabel=i=>{const t=TIERS[i],fmt=n=>n.toLocaleString("ru-RU");return i==0?`до<br>${fmt(t.max)}`:`от ${fmt(TIERS[i-1].max)}<br>до ${fmt(t.max)}`};
 const cap=s=>s.replace(/(^\s*|[.!?]\s+)([a-zа-яё])/gi,(m,p1,p2)=>p1+p2.toUpperCase());
 const ONB="Профиль успешно активирован! ✅\n\nПри каждом входе в приложение необходимо:\n\n• Зайти в чат → Отправить свой никнейм → Ввести код-пароль\n\n• Приложение автоматически разрешит доступ ко всем вкладкам.";
@@ -285,7 +286,7 @@ const FAQ_PARTNER=`<div class="c"><b>Партнерское вознагражд
 <div class="qa"><b>❓ Как получить выплату?</b>«Профиль» → «Вывести средства» → способ получения → заполнить форму → указать сумму → «Подтвердить». Срок зачисления средств — от 10 минут до 3 дней в зависимости от способа.</div>
 </div>`;
 let U={admin:{id:"admin",nick:"@admin",activeChat:null,pairChat:null,chatSub:"support",tab:"Чаты",viewPartner:null,lastSeen:{},pin:null,pinStage:"enter",pinBuf:"",pinFirst:null,pinResult:null,err:"",locked:false,lockStage:"nick",lockPinBuf:"",lockErr:"",lockPinResult:null,leadFilterStatus:"",leadSearchFio:""},p1:mk("p1","@alexey",true,"admin")},codes=[{c:"START-0001",o:"admin"}],leads=[],wd=[],L=[],dm=[],cur="p2",n=2;
-U.p2=mk("p2","",false,null);U.p1.msgs.push({t:ONB,b:1,ts:Date.now()});
+U.p2=mk("p2","",false,null);U.p1.msgs.push({id:genId(),t:ONB,b:1,ts:Date.now()});
 if(REAL_USER_ID){
  // авто-вход: админ -> админ-панель; реальный партнер в Telegram -> его собственный аккаунт по стабильному tg-id (не p2!)
  if(REAL_USER_ID!=="admin"&&!U[REAL_USER_ID])U[REAL_USER_ID]=mk(REAL_USER_ID,"",false,null);
@@ -307,7 +308,11 @@ function snapshotForSync(){
   // страницы на любом устройстве; остальные поля админа (чаты, вкладки, статус блокировки) синхронизировать
   // не нужно - это разовый аккаунт, не партнер, и его рабочее состояние UI сугубо локально для сессии.
   if(id==="admin"){users[id]={pin:u.pin||null};return}
-  users[id]={reg:u.reg,nick:u.nick||"",name:u.name||"",fld:u.fld||"",on:u.on,codeOk:u.codeOk,inv:u.inv||null,pin:u.pin||null,bal:u.bal||0,lim:u.lim||[],msgs:(u.msgs||[]).map(sanitizeMsg)};
+  // pinAttempts/blocked синхронизируются намеренно (в отличие от остального локального UI-состояния вроде
+  // activeChat/tab) - это защита от подбора код-пароля (см. lockPinTap/MAX_WRONG_PIN_ATTEMPTS), и блокировка
+  // должна действовать одинаково на любом устройстве партнера, а не сбрасываться при переустановке/новом
+  // устройстве/очистке локальных данных.
+  users[id]={reg:u.reg,nick:u.nick||"",name:u.name||"",fld:u.fld||"",on:u.on,codeOk:u.codeOk,inv:u.inv||null,pin:u.pin||null,bal:u.bal||0,lim:u.lim||[],msgs:(u.msgs||[]).map(sanitizeMsg),pinAttempts:u.pinAttempts||0,blocked:!!u.blocked};
  });
  return {leads,wd,L,dm,codes,users};
 }
@@ -399,7 +404,13 @@ function scheduleSync(){
     Object.keys(merged.users).forEach(id=>{
      const ru=(remote.users&&remote.users[id])||{};
      const lu=local.users[id]||{};
-     merged.users[id]=Object.assign({},ru,lu,{msgs:mergeByContent(ru.msgs,lu.msgs)});
+     // msgs - ЕДИНСТВЕННЫЙ из "append-only по идее" списков, который на самом деле РЕДАКТИРУЕТСЯ после создания
+     // (ackAny() помечает существующее сообщение b:0,done:1 на месте, не добавляя новое) - слияние "по
+     // содержимому" (mergeByContent) в этом случае ошибочно считало отредактированное сообщение НОВЫМ (его
+     // JSON изменился) и добавляло его ВТОРЫМ экземпляром рядом со старой (еще не прочитанной) версией из
+     // remote - отсюда дублирование сообщения об активации, особенно заметное именно после нажатия
+     // "Ознакомился". Исправлено: как и для leads/wd, используется слияние по стабильному id (mergeById).
+     merged.users[id]=Object.assign({},ru,lu,{msgs:mergeById(ru.msgs,lu.msgs)});
     });
     return DB.ref(SYNC_PATH).set(JSON.parse(JSON.stringify(merged)));
    })
@@ -449,7 +460,7 @@ if(DB){
  }catch(e){fbDbg("ошибка подписки (catch): "+(e&&e.message||e));_showLoadingGate=false}
 }
 const tier=p=>{const i=TIERS.findIndex(t=>p<t.max);return i<0?TIERS.length-1:i};
-const bot=(u,t,b)=>U[u].msgs.push({t,b,ts:Date.now()});
+const bot=(u,t,b)=>U[u].msgs.push({id:genId(),t,b,ts:Date.now()});
 const unreadSelf=u=>u.msgs.filter(m=>(m.ts||0)>(u.lastSeen.self||0)).length;
 const unreadWith=(u,id)=>dm.filter(x=>((x.a==u.id&&x.b==id)||(x.a==id&&x.b==u.id))&&x.from==id&&x.ts>(u.lastSeen[id]||0)).length;
 function totalUnread(u){
@@ -630,13 +641,25 @@ function lockNickSubmit(){const u=U[cur];const v=($("lkn")?$("lkn").value:"").tr
  const norm=s=>s.replace(/^@/,"").toLowerCase();
  if(!v||norm(v)!==norm(u.nick)){u.lockErr="Ник не совпадает. Попробуйте снова.";return render()}
  u.lockErr="";u.lockStage="pin";u.lockPinBuf="";render()}
-function lockPinTap(n){const u=U[cur];if(u.lockPinBuf.length>=4)return;u.lockPinBuf+=n;u.lockErr="";u.lockPinResult=null;
+const MAX_WRONG_PIN_ATTEMPTS=10;
+function lockPinTap(n){const u=U[cur];if(u.blocked)return;if(u.lockPinBuf.length>=4)return;u.lockPinBuf+=n;u.lockErr="";u.lockPinResult=null;
  if(u.lockPinBuf.length==4){
   if(u.lockPinBuf==u.pin){
+   u.pinAttempts=0;
    u.lockPinResult="ok";render();
    setTimeout(()=>{u.locked=false;u.lockStage="nick";u.lockPinBuf="";u.lockPinResult=null;render()},400);
    return;
   }else{
+   // Защита от подбора код-пароля: после MAX_WRONG_PIN_ATTEMPTS (10) неверных попыток подряд (счетчик
+   // сбрасывается только правильным вводом) профиль блокируется НАВСЕГДА - u.blocked синхронизируется между
+   // устройствами (см. snapshotForSync), чтобы сброс локальных данных или вход с другого устройства не
+   // позволяли продолжить подбор. Единственный доступный после этого экран - blockedView() с кнопкой
+   // "Написать партнеру", ведущей в чат с тем, кто выдал код приглашения (u.inv) - только администратор
+   // (при необходимости) или сам пригласивший партнер могут реально помочь восстановить доступ.
+   u.pinAttempts=(u.pinAttempts||0)+1;
+   if(u.id!=="admin"&&u.pinAttempts>=MAX_WRONG_PIN_ATTEMPTS){
+    u.blocked=true;u.lockPinResult=null;u.lockPinBuf="";render();return;
+   }
    u.lockPinResult="err";render();
    setTimeout(()=>{u.lockErr="Неверный пароль. Попробуйте снова.";u.lockPinBuf="";u.lockPinResult=null;render()},500);
    return;
@@ -650,7 +673,23 @@ function svInfoModal(u){
  <div class="mhd"><b>Описание услуг</b><button onclick="U['${u.id}'].svInfo=false;render()" style="width:28px;height:28px;padding:0;border-radius:50%;line-height:1" aria-label="Закрыть">✕</button></div>
  <div class="mbd">${SERVICES_INFO.map(([n,d])=>{const open=!!(u.svOpen&&u.svOpen[n]);return `<div class="svq"><div class="svq-h${open?" open":""}" onclick="toggleSvInfo('${u.id}','${n.replace(/'/g,"\\'")}')">${esc(n)}<button type="button" class="svtbtn ${open?"op":"cl"}" onclick="event.stopPropagation();toggleSvInfo('${u.id}','${n.replace(/'/g,"\\'")}')">${open?"Свернуть":"Открыть"}</button></div>${open?`<div class="svq-b">${esc(d)}</div>`:""}</div>`}).join("")}</div>
  </div></div>`}
+function sendDmBlocked(){const u=U[cur],to=u.inv;let v=$("dmin").value.trim();if(!v||!to)return;v=cap(v);dm.push({a:u.id,b:to,from:u.id,text:v,ts:Date.now()});render()}
+function blockedView(u){
+ const inv=u.inv&&U[u.inv]?U[u.inv]:null;
+ if(u.blockedChatOpen&&inv){
+  const msgs=dm.filter(x=>(x.a==u.id&&x.b==inv.id)||(x.a==inv.id&&x.b==u.id)).sort((a,b)=>a.ts-b.ts);
+  return `<div style="display:flex;flex-direction:column;height:100%">
+ <div class="r" style="margin-bottom:8px"><button onclick="U['${u.id}'].blockedChatOpen=false;render()">← Назад</button></div>
+ <div id="cl" style="flex:1;overflow-y:auto">${msgs.map(x=>`<div class="b ${x.from==u.id?"me":""}">${esc(x.text)}</div>`).join("")||`<div class="mu">Сообщений пока нет. Напишите ${esc(inv.nick)}.</div>`}</div>
+ <div class="r" style="margin-top:6px"><input id="dmin" placeholder="Сообщение: ${esc(inv.nick)}" onkeydown="if(event.key=='Enter')sendDmBlocked()"><button class="p" onclick="sendDmBlocked()">➤</button></div>
+ </div>`;
+ }
+ return `<div class="c" style="text-align:center"><b style="color:#dc2626">Профиль заблокирован</b>
+ <p class="mu">Превышено допустимое количество неверных попыток ввода код-пароля (${MAX_WRONG_PIN_ATTEMPTS}). Для восстановления доступа обратитесь к партнеру, который вас пригласил.</p>
+ ${inv?`<button class="p" style="width:100%" onclick="U['${u.id}'].blockedChatOpen=true;render()">Написать партнеру</button>`:`<p class="mu">Партнер, который вас пригласил, не найден. Обратитесь в поддержку.</p>`}
+ </div>`}
 function chatLocked(u){
+ if(u.blocked)return blockedView(u);
  if(u.lockStage=="nick")return `<div style="display:flex;flex-direction:column;height:100%">
  <div class="r" style="margin-top:0"><input id="lkn" placeholder="Сообщение" onkeydown="if(event.key=='Enter')lockNickSubmit()"><button class="p" onclick="lockNickSubmit()">➤</button></div>
  <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.lockErr||"")}</div>
@@ -686,11 +725,11 @@ function send(){
  // активирован! Теперь доступны все вкладки...", из-за чего в редких случаях (старые тестовые данные) в чате
  // могло оказаться два разных по тексту сообщения об активации - второе (без привязки к реальному флоу
  // pinTap()/ONB) убрано полностью.
- const u=U[cur];let v=$("in").value.trim();if(!v)return;v=cap(v);u.msgs.push({t:v,me:1});u.err="";
+ const u=U[cur];let v=$("in").value.trim();if(!v)return;v=cap(v);u.msgs.push({id:genId(),t:v,me:1});u.err="";
  bot(cur,"Сообщение передано в поддержку.");
  render();
 }
-function ackAny(i){const m=U[cur].msgs[i];m.b=0;m.done=1;if(m.t.startsWith("Профиль"))U[cur].msgs.push({t:"Как создать заявку?\n\n1) Нажать в чате кнопку «Создать заявку».\n\n2) Заполнить форму и отправить.\n\n3) После отправки у вас откроется новая вкладка «Заявки».\n\n4) Вкладка «Заявки» дает возможность в режиме реального времени видеть статус, комментарии, информацию по объекту и вознаграждение.",lead:1,ts:Date.now()});render()}
+function ackAny(i){const m=U[cur].msgs[i];m.b=0;m.done=1;if(m.t.startsWith("Профиль"))U[cur].msgs.push({id:genId(),t:"Как создать заявку?\n\n1) Нажать в чате кнопку «Создать заявку».\n\n2) Заполнить форму и отправить.\n\n3) После отправки у вас откроется новая вкладка «Заявки».\n\n4) Вкладка «Заявки» дает возможность в режиме реального времени видеть статус, комментарии, информацию по объекту и вознаграждение.",lead:1,ts:Date.now()});render()}
 function addLead(){
  const u=U[cur],f=$("f").value.trim(),p=$("p").value.trim(),cm=$("cm").value.trim(),s=$("s").value,wEl=document.querySelector('input[name="w"]:checked');
  u.lf=f;u.lp=p;u.ls=s;u.lcm=cm;u.lw=wEl?wEl.value:"";
@@ -896,7 +935,7 @@ function prof(u){
  <div><div class="mu">Баланс</div><div class="ok" style="font-size:24px">${rub(u.bal)}</div></div>
  <div class="r" style="margin-top:10px;gap:8px">
  <button class="p" style="flex:1" onclick="U['${u.id}'].wdForm=!U['${u.id}'].wdForm;render()">Вывести средства</button>
- ${hasWd?`<button style="flex:1" onclick="U['${u.id}'].wdListOpen=true;render()">Заявки на вывод</button>`:""}
+ ${hasWd?`<button style="flex:1;border-color:var(--ac);color:var(--ac)" onclick="U['${u.id}'].wdListOpen=true;render()">Заявки на вывод</button>`:""}
  </div></div>`;
  const wdBlock=u.wdForm?(u.wdReqForm?wdStage2(u):wdStage1(u)):"";
  return `${topBlock}
@@ -1113,7 +1152,7 @@ function adminResetAll(){
  _forceFullOverwrite=true; // полный сброс должен реально стереть данные в общей базе, а не слиться со старыми
  leads=[];wd=[];L=[];dm=[];codes=[{c:"START-0001",o:"admin"}];
  Object.keys(U).forEach(id=>{if(id!=="admin")delete U[id]});
- U.p1=mk("p1","@alexey",true,"admin");U.p1.msgs.push({t:ONB,b:1,ts:Date.now()});
+ U.p1=mk("p1","@alexey",true,"admin");U.p1.msgs.push({id:genId(),t:ONB,b:1,ts:Date.now()});
  U.p2=mk("p2","",false,null);
  U.admin.viewPartner=null;
  if(!U[cur])cur="admin";

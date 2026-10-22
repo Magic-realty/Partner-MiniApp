@@ -8,6 +8,13 @@
 :root[data-theme="dark"]{--bg:#0e1621;--card:#17212b;--tx:#f5f5f5;--mu:#8596a8;--ac:#5eb5f7;--bd:#243040;--ok:#4ade80;--me:#2b5278;--bot:#182533}
 html{scroll-padding-top:env(safe-area-inset-top,0px)}
 *{box-sizing:border-box}
+/* Явно разрешаем выделение текста и стандартное системное меню (копировать/вставить) по всему приложению -
+   некоторые WebView (в т.ч. внутри Telegram на части устройств/версий) по умолчанию блокируют выделение
+   текста вне текстовых полей, из-за чего не получается скопировать, например, текст сообщения в чате или
+   содержимое заявки. Поля ввода (input/textarea) и так поддерживают копирование/вставку штатно в браузере -
+   здесь на всякий случай подтверждено явно, чтобы ничего из CSS/WebView это не перекрывало. */
+*{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
+input,textarea{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
 html,body{touch-action:manipulation;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
 body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 body.in-tg,html.in-tg{height:100%;overflow:hidden}
@@ -277,7 +284,7 @@ const FAQ_PARTNER=`<div class="c"><b>Партнерское вознагражд
 <div class="qa"><b>❓ Как быстро происходит выплата?</b>После статуса «Сделка состоялась» в заявке партнера, средства поступают на ваш баланс в течение 3–7 дней (в течение 1 суток при максимальном лимите хотя бы в одной категории).</div>
 <div class="qa"><b>❓ Как получить выплату?</b>«Профиль» → «Вывести средства» → способ получения → заполнить форму → указать сумму → «Подтвердить». Срок зачисления средств — от 10 минут до 3 дней в зависимости от способа.</div>
 </div>`;
-let U={admin:{id:"admin",nick:"@admin",activeChat:null,pairChat:null,chatSub:"support",tab:"Чаты",viewPartner:null,lastSeen:{},pin:null,pinStage:"enter",pinBuf:"",pinFirst:null,pinResult:null,err:"",locked:false,lockStage:"nick",lockPinBuf:"",lockErr:"",lockPinResult:null},p1:mk("p1","@alexey",true,"admin")},codes=[{c:"START-0001",o:"admin"}],leads=[],wd=[],L=[],dm=[],cur="p2",n=2;
+let U={admin:{id:"admin",nick:"@admin",activeChat:null,pairChat:null,chatSub:"support",tab:"Чаты",viewPartner:null,lastSeen:{},pin:null,pinStage:"enter",pinBuf:"",pinFirst:null,pinResult:null,err:"",locked:false,lockStage:"nick",lockPinBuf:"",lockErr:"",lockPinResult:null,leadFilterStatus:"",leadSearchFio:""},p1:mk("p1","@alexey",true,"admin")},codes=[{c:"START-0001",o:"admin"}],leads=[],wd=[],L=[],dm=[],cur="p2",n=2;
 U.p2=mk("p2","",false,null);U.p1.msgs.push({t:ONB,b:1,ts:Date.now()});
 if(REAL_USER_ID){
  // авто-вход: админ -> админ-панель; реальный партнер в Telegram -> его собственный аккаунт по стабильному tg-id (не p2!)
@@ -672,12 +679,15 @@ function gen(){codes=codes.filter(c=>c.o!=cur);codes.push({c:Math.random().toStr
 // где была в прошлый раз (например, в самом низу), и партнер начинает читать не с начала текста.
 function scrollFaqTop(){try{const el=document.getElementById("cl");if(el)el.scrollTop=0}catch(e){}}
 function send(){
- const u=U[cur];let v=$("in").value.trim();if(!v)return;if(u.on)v=cap(v);u.msgs.push({t:v,me:1});u.err="";
- if(!u.on){
-  const m=v.match(/^(\S+)$/i),k=m&&codes.findIndex(x=>x.c==m[1].toUpperCase());
-  if(!m||k<0)bot(cur,"Неверный или использованный код.");
-  else{u.inv=codes[k].o;codes.splice(k,1);u.on=true;bot(cur,"Профиль активирован! Теперь доступны все вкладки.\nПри входе Telegram сам вас узнает, отправлять ник не нужно.",1)}
- }else bot(cur,"Сообщение передано в поддержку.");
+ // Старая активация кода прямо через чат (ввод кода как обычного сообщения) удалена - этот путь уже давно
+ // недостижим через интерфейс: пока !u.on, render() всегда показывает gate() (отдельный экран "Активация
+ // профиля" с полем act()), а не чат с этим инпутом, так что эта ветка никогда не могла сработать в реальном
+ // использовании. Она оставалась в коде и присылала свой собственный, отдельный от ONB текст "Профиль
+ // активирован! Теперь доступны все вкладки...", из-за чего в редких случаях (старые тестовые данные) в чате
+ // могло оказаться два разных по тексту сообщения об активации - второе (без привязки к реальному флоу
+ // pinTap()/ONB) убрано полностью.
+ const u=U[cur];let v=$("in").value.trim();if(!v)return;v=cap(v);u.msgs.push({t:v,me:1});u.err="";
+ bot(cur,"Сообщение передано в поддержку.");
  render();
 }
 function ackAny(i){const m=U[cur].msgs[i];m.b=0;m.done=1;if(m.t.startsWith("Профиль"))U[cur].msgs.push({t:"Как создать заявку?\n\n1) Нажать в чате кнопку «Создать заявку».\n\n2) Заполнить форму и отправить.\n\n3) После отправки у вас откроется новая вкладка «Заявки».\n\n4) Вкладка «Заявки» дает возможность в режиме реального времени видеть статус, комментарии, информацию по объекту и вознаграждение.",lead:1,ts:Date.now()});render()}
@@ -722,7 +732,7 @@ function upd(i){
    const newLim=Math.min(TIERS[t].cap,Math.round(u.lim[t]*1.1));
    l.rw=u.lim[t];l._newLim=newLim;u.lim[t]=newLim;
    l.paid=1;l.credited=0;
-   bot(l.o,"Ура! Сделка состоялась. 🎉 Зайдите во вкладку \"Заявки\", чтобы посмотреть подробнее:\n\n"+l.fio+"\n"+l.ph+"\n"+l.sv+"\nКатегория «"+TIERS[t].n+"»\nВаш лимит вырос: "+l._oldLim.toLocaleString("ru-RU")+" → "+newLim.toLocaleString("ru-RU")+".")
+   bot(l.o,"Ура! Сделка состоялась. Зайдите во вкладку \"Заявки\", чтобы посмотреть подробнее: 🎉\n\n"+l.fio+"\n"+l.ph+"\n"+l.sv+"\nКатегория «"+TIERS[t].n+"»\nВаш лимит вырос: "+l._oldLim.toLocaleString("ru-RU")+" → "+newLim.toLocaleString("ru-RU")+".")
   }
  }else if(statusChanged||firstApply){
   bot(l.o,"Статус заявки изменился: 🔄\n"+l.fio+"\n"+l.ph+"\n"+l.sv+"\nСтатус: "+l.st+".");
@@ -1013,7 +1023,17 @@ function prt(u){
  const ps=Object.values(U).filter(x=>x.inv==u.id);
  const rows=ps.map(p=>{const ls=leads.filter(l=>l.o==p.id),d=ls.filter(l=>l.paid).length,b=L.filter(x=>x.to==u.id&&x.from==p.id).reduce((a,x)=>a+x.sum,0),last=ls.length?Math.max(...ls.map(l=>l.ts||0)):0;
  return `<tr style="cursor:pointer" onclick="U['${u.id}'].viewPartner='${p.id}';render()"><td>${p.nick}${p.on?"":" ⏳"}</td><td>${ls.length}</td><td>${d}</td><td>${rub(b)}</td><td class="mu">${fmtAgo(last)}</td></tr>`}).join("");
- return `<div class="c"><b>Пригласить партнера</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Если партнер рядом — покажите ему QR-код для сканирования и быстрой регистрации.<br><u>Код действует 5 минут после создания.</u></p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${my.map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button><button class="${u.qrOpen==c.c?"p":""}" onclick="toggleQR('${c.c}')">QR-код</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div>${u.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><div id="qrcv" style="display:inline-block"></div><div class="mu" style="margin-top:6px">Покажите QR-код партнеру</div></div>`:""}</div>
+ const myCode=my.find(c=>c.c!=="START-0001")||null;
+ return `<div class="c"><b>Пригласить партнера</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Если партнер рядом — покажите ему QR-код для сканирования и быстрой регистрации.<br><u>Код действует 5 минут после создания.</u></p>
+ <div class="r" style="align-items:stretch">
+ <button class="p" onclick="gen()">Создать код</button>
+ <span class="cc" style="flex:1.3;justify-content:center;${myCode?"":"border-color:var(--ac)"}">${myCode?esc(myCode.c):""}</span>
+ </div>
+ ${myCode?`<div class="r" style="margin-top:8px">
+ <button style="flex:1;${_copiedCodes[myCode.c]?"":"border-color:var(--ac);color:var(--ac)"}" class="${_copiedCodes[myCode.c]?"p":""}" onclick="cp('${myCode.c}')">${_copiedCodes[myCode.c]?"Скопировано ✓":"Копировать"}</button>
+ <button style="flex:1;${u.qrOpen==myCode.c?"":"border-color:var(--ac);color:var(--ac)"}" class="${u.qrOpen==myCode.c?"p":""}" onclick="toggleQR('${myCode.c}')">QR-код</button>
+ </div>`:""}
+ ${u.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><div id="qrcv" style="display:inline-block"></div><div class="mu" style="margin-top:6px">Покажите QR-код партнеру</div></div>`:""}</div>
  <div class="c"><b>Мои партнеры</b><p class="mu">Вы получаете 10% с вознаграждения каждого приглашенного партнера, <u>его выплата не уменьшается</u>. Нажмите на партнера, чтобы увидеть статусы его заявок.</p>
  <table><tr><th>Ник</th><th>Заявки</th><th>Сделки</th><th>Ваш бонус</th><th>Активность</th></tr>${rows||'<tr><td colspan=5 class="mu">Пока никого. Создайте код в профиле.</td></tr>'}</table></div>`}
 function adminSupportChat(){
@@ -1066,7 +1086,17 @@ function admPartnersView(){
  <div class="mu">${esc(p.name)||"—"} · ${esc(p.fld)||"—"} · от ${inv}</div>
  <table style="margin-top:8px"><tr><th>Заявки</th><th>Сделки</th><th>Прибыль</th><th>Реферал</th><th>Активность</th></tr>
  <tr><td>${ls.length}</td><td>${deals.length}</td><td>${rub(profit)}</td><td>${refs}</td><td class="mu">${fmtAgo(last)}</td></tr></table></div>`}).join("")||'<div class="mu">Нет зарегистрированных партнеров</div>';
- return `<div class="c"><b>Коды администратора</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Если партнер рядом — покажите ему QR-код для сканирования и быстрой регистрации.<br><u>Код действует 5 минут после создания.</u></p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${codes.filter(c=>c.o=="admin").map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button><button class="${U.admin.qrOpen==c.c?"p":""}" onclick="toggleQR('${c.c}')">QR-код</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div>${U.admin.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><div id="qrcv" style="display:inline-block"></div><div class="mu" style="margin-top:6px">Покажите QR-код партнеру</div></div>`:""}</div>
+ const adminMyCode=codes.find(c=>c.o=="admin"&&c.c!=="START-0001")||null;
+ return `<div class="c"><b>Коды администратора</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Если партнер рядом — покажите ему QR-код для сканирования и быстрой регистрации.<br><u>Код действует 5 минут после создания.</u></p>
+ <div class="r" style="align-items:stretch">
+ <button class="p" onclick="gen()">Создать код</button>
+ <span class="cc" style="flex:1.3;justify-content:center;${adminMyCode?"":"border-color:var(--ac)"}">${adminMyCode?esc(adminMyCode.c):""}</span>
+ </div>
+ ${adminMyCode?`<div class="r" style="margin-top:8px">
+ <button style="flex:1;${_copiedCodes[adminMyCode.c]?"":"border-color:var(--ac);color:var(--ac)"}" class="${_copiedCodes[adminMyCode.c]?"p":""}" onclick="cp('${adminMyCode.c}')">${_copiedCodes[adminMyCode.c]?"Скопировано ✓":"Копировать"}</button>
+ <button style="flex:1;${U.admin.qrOpen==adminMyCode.c?"":"border-color:var(--ac);color:var(--ac)"}" class="${U.admin.qrOpen==adminMyCode.c?"p":""}" onclick="toggleQR('${adminMyCode.c}')">QR-код</button>
+ </div>`:""}
+ ${U.admin.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><div id="qrcv" style="display:inline-block"></div><div class="mu" style="margin-top:6px">Покажите QR-код партнеру</div></div>`:""}</div>
  <div class="c"><b style="color:#dc2626">Опасная зона</b><p class="mu">Полностью очищает все тестовые данные: партнеров, заявки, коды, сообщения и запросы на вывод. Используйте только для тестирования.</p><button style="width:100%;${_resetArmed?"background:#dc2626;color:#fff;border-color:#dc2626":"border-color:#dc2626;color:#dc2626"}" onclick="adminResetAll()">${_resetArmed?"⚠️ Нажмите еще раз, чтобы подтвердить":"🗑 Сбросить все тестовые данные"}</button></div>
  ${list}`}
 let _resetArmed=false,_resetArmTimer=null;
@@ -1090,11 +1120,56 @@ function adminResetAll(){
  render();
 }
 function toggleLead(i){leads[i]._expanded=!leads[i]._expanded;render()}
+function leadSearchInput(v){
+ // render() всегда полностью перестраивает innerHTML, поэтому обычный oninput+render() для текстового поля
+ // "убивал" бы фокус/курсор на каждое нажатие клавиши (так же, как это уже учтено в остальных текстовых полях
+ // приложения, которые НЕ вызывают render() прямо из oninput). Здесь фильтрация обязана обновляться "на лету",
+ // поэтому render() вызывается, но сразу после пересборки DOM фокус и позиция курсора (конец строки)
+ // восстанавливаются вручную на новый одноименный элемент - тот же прием, что и в fix_v2_caret_redraw_forcing.
+ U.admin.leadSearchFio=v;render();
+ const doRestore=()=>{try{const el=document.getElementById("leadSearchFio");if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length)}}catch(e){}};
+ (window.requestAnimationFrame||setTimeout)(doRestore,0);
+}
+let _clearLeadsArmed=0,_clearLeadsArmTimer=null;
+function adminClearLeadsHistory(){
+ if(U[cur].id!=="admin")return;
+ // Три нажатия подряд (а не два, как в "Опасной зоне" на вкладке Партнеры) - по явной просьбе заказчика,
+ // чтобы снизить риск случайного удаления всей истории заявок прямо с рабочей вкладки, которой пользуются чаще.
+ if(_clearLeadsArmed<2){
+  _clearLeadsArmed++;clearTimeout(_clearLeadsArmTimer);
+  _clearLeadsArmTimer=setTimeout(()=>{_clearLeadsArmed=0;render()},5000);
+  return render();
+ }
+ _clearLeadsArmed=0;clearTimeout(_clearLeadsArmTimer);
+ _forceFullOverwrite=true; // намеренное удаление - слияние (см. scheduleSync) здесь недопустимо, см. adminResetAll
+ leads=[];
+ render();
+}
 function admLeadsView(){
+ const au=U.admin;
+ // Номер заявки для отображения - это НЕ внутренний уникальный id (он нужен только для надежного слияния
+ // при синхронизации между устройствами, см. sync_overwrite_race_condition_fix_oct22, и может быть большим
+ // "некруглым" числом) - это порядковый номер по порядку СОЗДАНИЯ заявки (по ts), 1,2,3... - именно так, как
+ // ожидает видеть администратор.
+ const leadsByTs=[...leads].sort((a,b)=>(a.ts||0)-(b.ts||0));
+ const leadOrderNum={};leadsByTs.forEach((x,idx)=>{leadOrderNum[x.id]=idx+1});
+ const filterStatus=au.leadFilterStatus||"",searchFio=(au.leadSearchFio||"").trim().toLowerCase();
+ const controls=`<div class="c">
+ <div class="r" style="flex-wrap:wrap;gap:8px">
+ <select style="flex:1;min-width:150px" onchange="U.admin.leadFilterStatus=this.value;render()">
+ <option value="">Все статусы</option>
+ ${[...MAIN,...PAUSE].map(s=>`<option value="${s}" ${filterStatus==s?"selected":""}>${s}</option>`).join("")}
+ </select>
+ <input id="leadSearchFio" style="flex:1;min-width:150px" placeholder="Поиск по ФИО" value="${esc(au.leadSearchFio||"")}" oninput="leadSearchInput(this.value)">
+ </div>
+ <button style="width:100%;margin-top:10px;${_clearLeadsArmed>0?"background:#dc2626;color:#fff;border-color:#dc2626":"border-color:#dc2626;color:#dc2626"}" onclick="adminClearLeadsHistory()">${_clearLeadsArmed==0?"🗑 Очистить историю":_clearLeadsArmed==1?"⚠️ Нажмите еще раз (1/2)":"⚠️ Нажмите последний раз для подтверждения (2/2)"}</button>
+ </div>`;
  const l=leads.map((x,i)=>{const o=U[x.o],ref=o.inv&&o.inv!="admin"?U[o.inv]:null;
+ if(filterStatus&&x.st!==filterStatus)return "";
+ if(searchFio&&!(x.fio||"").toLowerCase().includes(searchFio))return "";
  const priceVal=x.priceCurrent?(+x.priceCurrent).toLocaleString("ru-RU"):"";
  const renoOpts=["","есть","нет","требуется"];
- const head=`<b>#${x.id} ${esc(x.fio)}</b> ${esc(x.ph)}<div class="mu">${x.sv} · от ${o.nick}${ref?` (${ref.nick})`:""}</div>`;
+ const head=`<div>№${leadOrderNum[x.id]}</div><b>${esc(x.fio)}</b><div>${esc(x.ph)}</div><div class="mu" style="margin-top:2px">${x.sv} · от ${o.nick}${ref?` (${ref.nick})`:""}</div>`;
  if(!x._expanded){
   return `<div class="c">${head}
  <div style="margin-top:6px"><span class="tag ${stColor(x.st)}">${x.st}</span></div>
@@ -1115,7 +1190,7 @@ function admLeadsView(){
  <div class="r" style="align-items:center;margin-top:12px"><button class="p" onclick="upd(${i})">Применить</button>${x._applied?'<span class="ok">Отправлено ✓</span>':""}</div>
  ${x.paid?(x.credited?`<div class="mu" style="margin-top:6px"><span class="ok">Начислено на баланс: ${rub(x.rw)}</span></div>`:`<div class="r" style="margin-top:8px;align-items:center"><span class="mu">Вознаграждение ${rub(x.rw)} не начислено</span><button onclick="creditReward(${i})">Начислить на баланс</button></div>`):""}
  </div>`}).join("")||'<div class="mu">Заявок нет</div>';
- return `<div class="mu" style="color:#c0392b">${esc(U.admin.err||"")}</div>${l}`}
+ return `<div class="mu" style="color:#c0392b">${esc(U.admin.err||"")}</div>${controls}${l}`}
 function admWdView(){
  const FLABEL={inn:"ИНН",kpp:"КПП",rname:"Наименование получателя",rs:"Расчетный счет (р/с)",bank:"Банк получателя",bik:"БИК",ks:"Корр. счет",fio:"ФИО получателя",card:"Номер карты",wallet:"Номер кошелька ЮMoney"};
  const tag=x=>x.status=="pending"?'<span class="tag st-yellow">В обработке</span>':x.status=="approved"?'<span class="tag st-green">Одобрено</span>':'<span class="tag st-red">Отклонено</span>';

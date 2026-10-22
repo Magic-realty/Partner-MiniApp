@@ -348,12 +348,24 @@ function mergeByContent(remoteArr,localArr){
  const seen=new Set(remoteArr.map(key));
  return remoteArr.concat(localArr.filter(x=>!seen.has(key(x))));
 }
+var _forceFullOverwrite=false;
 function scheduleSync(){
  if(!DB)return;
  if(!_firstSyncApplied){fbDbg("локальное изменение отложено до получения данных из базы (защита от перезаписи)");return}
+ const forceFull=_forceFullOverwrite;_forceFullOverwrite=false;
  clearTimeout(_syncTimer);
  _syncTimer=setTimeout(()=>{
   try{
+   if(forceFull){
+    // Намеренная полная замена данных (например кнопка администратора "Сбросить все тестовые данные") -
+    // слияние (см. ниже) здесь НЕДОПУСТИМО: оно специально устроено так, чтобы ничего не терять, а значит
+    // "вернуло" бы в базу все старые записи, которые мы только что намеренно удалили локально, и сброс
+    // выглядел бы так, будто кнопка не работает. Для таких операций пишем как раньше - без слияния.
+    DB.ref(SYNC_PATH).set(JSON.parse(JSON.stringify(snapshotForSync())))
+     .then(()=>fbDbg("отправлено ✓ ("+new Date().toLocaleTimeString()+")"))
+     .catch(e=>fbDbg("ОШИБКА ОТПРАВКИ: "+(e&&e.code||e&&e.message||e)));
+    return;
+   }
    DB.ref(SYNC_PATH).once("value").then(snap=>{
     const remote=snap.val()||{};
     const local=snapshotForSync();
@@ -1001,7 +1013,7 @@ function prt(u){
  const ps=Object.values(U).filter(x=>x.inv==u.id);
  const rows=ps.map(p=>{const ls=leads.filter(l=>l.o==p.id),d=ls.filter(l=>l.paid).length,b=L.filter(x=>x.to==u.id&&x.from==p.id).reduce((a,x)=>a+x.sum,0),last=ls.length?Math.max(...ls.map(l=>l.ts||0)):0;
  return `<tr style="cursor:pointer" onclick="U['${u.id}'].viewPartner='${p.id}';render()"><td>${p.nick}${p.on?"":" ⏳"}</td><td>${ls.length}</td><td>${d}</td><td>${rub(b)}</td><td class="mu">${fmtAgo(last)}</td></tr>`}).join("");
- return `<div class="c"><b>Пригласить партнера</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Если партнер рядом — покажите ему QR-код для сканирования и быстрой регистрации. Код действует 5 минут после создания.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${my.map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button><button class="${u.qrOpen==c.c?"p":""}" onclick="toggleQR('${c.c}')">QR-код</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div>${u.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><div id="qrcv" style="display:inline-block"></div><div class="mu" style="margin-top:6px">Покажите QR-код партнеру</div></div>`:""}</div>
+ return `<div class="c"><b>Пригласить партнера</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Если партнер рядом — покажите ему QR-код для сканирования и быстрой регистрации.<br><u>Код действует 5 минут после создания.</u></p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${my.map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button><button class="${u.qrOpen==c.c?"p":""}" onclick="toggleQR('${c.c}')">QR-код</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div>${u.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><div id="qrcv" style="display:inline-block"></div><div class="mu" style="margin-top:6px">Покажите QR-код партнеру</div></div>`:""}</div>
  <div class="c"><b>Мои партнеры</b><p class="mu">Вы получаете 10% с вознаграждения каждого приглашенного партнера, <u>его выплата не уменьшается</u>. Нажмите на партнера, чтобы увидеть статусы его заявок.</p>
  <table><tr><th>Ник</th><th>Заявки</th><th>Сделки</th><th>Ваш бонус</th><th>Активность</th></tr>${rows||'<tr><td colspan=5 class="mu">Пока никого. Создайте код в профиле.</td></tr>'}</table></div>`}
 function adminSupportChat(){
@@ -1054,7 +1066,7 @@ function admPartnersView(){
  <div class="mu">${esc(p.name)||"—"} · ${esc(p.fld)||"—"} · от ${inv}</div>
  <table style="margin-top:8px"><tr><th>Заявки</th><th>Сделки</th><th>Прибыль</th><th>Реферал</th><th>Активность</th></tr>
  <tr><td>${ls.length}</td><td>${deals.length}</td><td>${rub(profit)}</td><td>${refs}</td><td class="mu">${fmtAgo(last)}</td></tr></table></div>`}).join("")||'<div class="mu">Нет зарегистрированных партнеров</div>';
- return `<div class="c"><b>Коды администратора</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Если партнер рядом — покажите ему QR-код для сканирования и быстрой регистрации. Код действует 5 минут после создания.</p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${codes.filter(c=>c.o=="admin").map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button><button class="${U.admin.qrOpen==c.c?"p":""}" onclick="toggleQR('${c.c}')">QR-код</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div>${U.admin.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><div id="qrcv" style="display:inline-block"></div><div class="mu" style="margin-top:6px">Покажите QR-код партнеру</div></div>`:""}</div>
+ return `<div class="c"><b>Коды администратора</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Если партнер рядом — покажите ему QR-код для сканирования и быстрой регистрации.<br><u>Код действует 5 минут после создания.</u></p><div class="r" style="flex-wrap:wrap;align-items:center"><button class="p" onclick="gen()">Создать код</button>${codes.filter(c=>c.o=="admin").map(c=>`<span class="cc"><span>${c.c}</span><button ${_copiedCodes[c.c]?'class="p"':""} onclick="cp('${c.c}')">${_copiedCodes[c.c]?"Скопировано ✓":"Копировать"}</button><button class="${U.admin.qrOpen==c.c?"p":""}" onclick="toggleQR('${c.c}')">QR-код</button></span>`).join("")||'<span class="mu">Активных кодов нет</span>'}</div>${U.admin.qrOpen?`<div class="c" style="text-align:center;margin-top:8px"><div id="qrcv" style="display:inline-block"></div><div class="mu" style="margin-top:6px">Покажите QR-код партнеру</div></div>`:""}</div>
  <div class="c"><b style="color:#dc2626">Опасная зона</b><p class="mu">Полностью очищает все тестовые данные: партнеров, заявки, коды, сообщения и запросы на вывод. Используйте только для тестирования.</p><button style="width:100%;${_resetArmed?"background:#dc2626;color:#fff;border-color:#dc2626":"border-color:#dc2626;color:#dc2626"}" onclick="adminResetAll()">${_resetArmed?"⚠️ Нажмите еще раз, чтобы подтвердить":"🗑 Сбросить все тестовые данные"}</button></div>
  ${list}`}
 let _resetArmed=false,_resetArmTimer=null;
@@ -1068,6 +1080,7 @@ function adminResetAll(){
   return render();
  }
  _resetArmed=false;clearTimeout(_resetArmTimer);
+ _forceFullOverwrite=true; // полный сброс должен реально стереть данные в общей базе, а не слиться со старыми
  leads=[];wd=[];L=[];dm=[];codes=[{c:"START-0001",o:"admin"}];
  Object.keys(U).forEach(id=>{if(id!=="admin")delete U[id]});
  U.p1=mk("p1","@alexey",true,"admin");U.p1.msgs.push({t:ONB,b:1,ts:Date.now()});

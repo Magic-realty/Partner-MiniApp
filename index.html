@@ -716,7 +716,7 @@ function blockedView(u){
  const inv=u.inv&&U[u.inv]?U[u.inv]:null;
  if(u.blockedChatOpen&&inv){
   const msgs=dm.filter(x=>(x.a==u.id&&x.b==inv.id)||(x.a==inv.id&&x.b==u.id)).sort((a,b)=>a.ts-b.ts);
-  return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">
+  return `<div style="position:absolute;inset:10px;display:flex;flex-direction:column">
  <div class="r" style="margin-bottom:8px"><button onclick="U['${u.id}'].blockedChatOpen=false;render()">← Назад</button></div>
  <div id="cl" style="flex:1;overflow-y:auto">${msgs.map(x=>`<div class="b ${x.from==u.id?"me":""}">${esc(x.text)}</div>`).join("")||`<div class="mu">Сообщений пока нет. Напишите ${esc(inv.nick)}.</div>`}</div>
  <div class="r" style="margin-top:6px"><input id="dmin" placeholder="Сообщение: ${esc(inv.nick)}" onkeydown="if(event.key=='Enter')sendDmBlocked()"><button class="p" onclick="sendDmBlocked()">➤</button></div>
@@ -728,7 +728,7 @@ function blockedView(u){
  </div>`}
 function chatLocked(u){
  if(u.blocked)return blockedView(u);
- if(u.lockStage=="nick")return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">
+ if(u.lockStage=="nick")return `<div style="position:absolute;inset:10px;display:flex;flex-direction:column">
  <div class="r" style="margin-top:0"><input id="lkn" placeholder="Сообщение" onkeydown="if(event.key=='Enter')lockNickSubmit()"><button class="p" onclick="lockNickSubmit()">➤</button></div>
  <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.lockErr||"")}</div>
  <div id="cl" style="flex:1;overflow-y:auto"></div></div>`;
@@ -738,7 +738,7 @@ function chatLocked(u){
  const creating=!u.pin;
  const tapFn=creating?"lockPinCreateTap":"lockPinTap",delFn=creating?"lockPinCreateDel":"lockPinDel";
  const title=creating?((u.lockPinStage||"enter")=="confirm"?"Повторите код-пароль":"Придумайте код-пароль"):"Введите пароль";
- return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">
+ return `<div style="position:absolute;inset:10px;display:flex;flex-direction:column">
  <div class="c" style="text-align:center;margin-top:0"><b>${title}</b>
  <div class="pin">${[0,1,2,3].map(i=>`<span class="${u.lockPinBuf.length>i?"f":""}"></span>`).join("")}</div>
  <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.lockErr||"")}</div>
@@ -1022,7 +1022,7 @@ function chat(u){
  <button style="flex:1" class="${u.activeChat=="faq"?"p":""}" onclick="U['${u.id}'].activeChat='faq';render();scrollFaqTop()">❓ Частые вопросы</button>
  </div>`;
  if(u.activeChat=="faq"){
-  return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">${switcher}<div class="faqtabs">
+  return `<div style="position:absolute;inset:10px;display:flex;flex-direction:column">${switcher}<div class="faqtabs">
  <button class="${(u.faqTab||"reward")=="reward"?"p":""}" onclick="U['${u.id}'].faqTab='reward';render();scrollFaqTop()">Вознаграждение</button>
  <button class="${u.faqTab=="partners"?"p":""}" onclick="U['${u.id}'].faqTab='partners';render();scrollFaqTop()">Партнеры</button>
  </div>
@@ -1034,11 +1034,11 @@ function chat(u){
   const emptyTxt=isSupport?"Сообщений пока нет. Напишите в поддержку.":`Сообщений пока нет. Напишите ${esc(other.nick)}.`;
   const placeholderTxt=isSupport?"Сообщение в поддержку":`Сообщение: ${esc(other.nick)}`;
   const msgs=dm.filter(x=>(x.a==u.id&&x.b==other.id)||(x.a==other.id&&x.b==u.id)).sort((a,b)=>a.ts-b.ts);
-  return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">${switcher}<div id="cl" style="flex:1;overflow-y:auto">${msgs.map(x=>`<div class="b ${x.from==u.id?"me":""}">${esc(x.text)}</div>`).join("")||`<div class="mu">${emptyTxt}</div>`}</div>
+  return `<div style="position:absolute;inset:10px;display:flex;flex-direction:column">${switcher}<div id="cl" style="flex:1;overflow-y:auto">${msgs.map(x=>`<div class="b ${x.from==u.id?"me":""}">${esc(x.text)}</div>`).join("")||`<div class="mu">${emptyTxt}</div>`}</div>
  <div class="r" style="margin-top:6px"><input id="dmin" placeholder="${placeholderTxt}" onkeydown="if(event.key=='Enter')sendDm()"><button class="p" onclick="sendDm()">➤</button></div>${extra}</div>`;
  }
  const m=u.msgs.map((x,i)=>`<div class="b ${x.me?"me":""}">${esc(x.t)}${x.b?`<button class="p" style="display:block;margin-top:12px" onclick="ackAny(${i})">Ознакомился</button>`:""}${x.lead?`<button class="p" style="display:block;margin-top:12px" onclick="U['${u.id}'].form=true;U['${u.id}'].tab='Заявки';render()">Создать заявку</button>`:""}</div>`).join("");
- return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">${switcher}<div id="cl" style="flex:1;overflow-y:auto">${m||'<div class="mu">Чат пуст. Отправьте код приглашения.</div>'}</div>
+ return `<div style="position:absolute;inset:10px;display:flex;flex-direction:column">${switcher}<div id="cl" style="flex:1;overflow-y:auto">${m||'<div class="mu">Чат пуст. Отправьте код приглашения.</div>'}</div>
  <div class="r" style="margin-top:6px"><input id="in" placeholder="${u.on?"Сообщение":"XXXX-XXXX"}" onkeydown="if(event.key=='Enter')send()"><button class="p" onclick="send()">➤</button></div>${extra}</div>`}
 function leadDetail(u,l){
  const mi=MAIN.indexOf(l.st),unlocked=mi>=4;

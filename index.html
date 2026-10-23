@@ -34,7 +34,7 @@ body.in-tg,html.in-tg{height:100%;overflow:hidden}
 .svtbtn.op{background:var(--bg);color:var(--mu);border-color:var(--bd)}
 .svq-b{padding:0 0 10px;color:var(--mu)}
 .hd{background:var(--ac);color:#fff;padding:10px 14px;font-weight:600}
-.body{flex:1;padding:10px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.body{flex:1;padding:10px;overflow-y:auto;-webkit-overflow-scrolling:touch;position:relative}
 .nav{display:flex;border-top:1px solid var(--bd);background:var(--card);padding-bottom:max(8px,env(safe-area-inset-bottom,0px))}
 .nav button{flex:1;border:0;background:none;padding:14px 2px;color:var(--mu);font-size:13px;min-height:48px}
 .nav button.on{color:var(--ac);font-weight:600}
@@ -238,7 +238,7 @@ const mk=(id,nick,on,inv)=>({id,nick,on,inv,reg:!!nick,codeOk:!!on,pinStage:"ent
  lf:"",lp:"",ls:SV[0],lcm:"",lw:"",errFio:"",errPhone:"",errComment:"",errContact:"",
  wdForm:false,wdReqForm:false,wdSystem:"",wdStatus:"",wdFields:{},wdSum:"",wdListOpen:false,activeChat:"self",faqTab:"reward",limInfo:false,lastSeen:{},leadView:null,viewPartner:null,
  locked:false,lockStage:"nick",lockPinBuf:"",lockErr:"",lockPinResult:null,svInfo:false,svOpen:{},
- pinAttempts:0,blocked:false,blockedChatOpen:false});
+ pinAttempts:0,blocked:false,blockedChatOpen:false,leadFilterStatus:"",leadSearchFio:"",lockPinStage:"enter",lockPinFirst:null});
 const tierLabel=i=>{const t=TIERS[i],fmt=n=>n.toLocaleString("ru-RU");return i==0?`до<br>${fmt(t.max)}`:`от ${fmt(TIERS[i-1].max)}<br>до ${fmt(t.max)}`};
 const cap=s=>s.replace(/(^\s*|[.!?]\s+)([a-zа-яё])/gi,(m,p1,p2)=>p1+p2.toUpperCase());
 const ONB="Профиль успешно активирован! ✅\n\nПри каждом входе в приложение необходимо:\n\n• Зайти в чат → Отправить свой никнейм → Ввести код-пароль\n\n• Приложение автоматически разрешит доступ ко всем вкладкам.";
@@ -312,7 +312,7 @@ function snapshotForSync(){
   // activeChat/tab) - это защита от подбора код-пароля (см. lockPinTap/MAX_WRONG_PIN_ATTEMPTS), и блокировка
   // должна действовать одинаково на любом устройстве партнера, а не сбрасываться при переустановке/новом
   // устройстве/очистке локальных данных.
-  users[id]={reg:u.reg,nick:u.nick||"",name:u.name||"",fld:u.fld||"",on:u.on,codeOk:u.codeOk,inv:u.inv||null,pin:u.pin||null,bal:u.bal||0,lim:u.lim||[],msgs:(u.msgs||[]).map(sanitizeMsg),pinAttempts:u.pinAttempts||0,blocked:!!u.blocked};
+  users[id]={reg:u.reg,nick:u.nick||"",name:u.name||"",fld:u.fld||"",on:u.on,codeOk:u.codeOk,inv:u.inv||null,pin:u.pin||null,bal:u.bal||0,lim:u.lim||[],msgs:(u.msgs||[]).map(sanitizeMsg),pinAttempts:u.pinAttempts||0,blocked:!!u.blocked,regTs:u.regTs||0};
  });
  return {leads,wd,L,dm,codes,users};
 }
@@ -364,20 +364,32 @@ var _forceFullOverwrite=false;
 function scheduleSync(){
  if(!DB)return;
  if(!_firstSyncApplied){fbDbg("локальное изменение отложено до получения данных из базы (защита от перезаписи)");return}
- const forceFull=_forceFullOverwrite;_forceFullOverwrite=false;
+ if(_forceFullOverwrite){
+  // Намеренная полная замена данных (кнопки "Очистить историю"/"Сбросить все тестовые данные") - слияние
+  // (см. ниже) здесь НЕДОПУСТИМО, т.к. оно специально устроено так, чтобы ничего не терять, а значит
+  // "вернуло" бы в базу только что удаленные записи. РАНЬШЕ эта запись тоже ждала общий 400мс debounce-таймер
+  // (_syncTimer) - из-за этого, если администратор успевал сделать ЛЮБОЕ другое действие в приложении
+  // (например просто перейти на другую вкладку) в течение этих 400мс, тот следующий render() вызывал
+  // scheduleSync() повторно, который отменял (clearTimeout) ещё не отправленную принудительную запись и
+  // подставлял вместо неё обычную запись со слиянием - слияние не знало о намеренном удалении и "восстанавливало"
+  // только что удаленные записи обратно из базы (там ведь еще лежали старые данные - принудительная запись
+  // из-за отмены никогда до них не добралась). Именно это вызывало "заявки пропадают после очистки истории, а
+  // затем появляются снова после перехода между вкладками". Исправлено: принудительная перезапись выполняется
+  // НЕМЕДЛЕННО, а не через общий debounce-таймер - её невозможно отменить/подменить никаким последующим
+  // действием в приложении.
+  _forceFullOverwrite=false;
+  clearTimeout(_syncTimer); // отменяем любую еще не отправленную ОБЫЧНУЮ (слитую) запись - она основана на
+                            // данных ДО удаления и не должна отправиться позже этой прямой записи
+  try{
+   DB.ref(SYNC_PATH).set(JSON.parse(JSON.stringify(snapshotForSync())))
+    .then(()=>fbDbg("отправлено ✓ ("+new Date().toLocaleTimeString()+")"))
+    .catch(e=>fbDbg("ОШИБКА ОТПРАВКИ: "+(e&&e.code||e&&e.message||e)));
+  }catch(e){fbDbg("ошибка отправки (sync): "+(e&&e.message||e))}
+  return;
+ }
  clearTimeout(_syncTimer);
  _syncTimer=setTimeout(()=>{
   try{
-   if(forceFull){
-    // Намеренная полная замена данных (например кнопка администратора "Сбросить все тестовые данные") -
-    // слияние (см. ниже) здесь НЕДОПУСТИМО: оно специально устроено так, чтобы ничего не терять, а значит
-    // "вернуло" бы в базу все старые записи, которые мы только что намеренно удалили локально, и сброс
-    // выглядел бы так, будто кнопка не работает. Для таких операций пишем как раньше - без слияния.
-    DB.ref(SYNC_PATH).set(JSON.parse(JSON.stringify(snapshotForSync())))
-     .then(()=>fbDbg("отправлено ✓ ("+new Date().toLocaleTimeString()+")"))
-     .catch(e=>fbDbg("ОШИБКА ОТПРАВКИ: "+(e&&e.code||e&&e.message||e)));
-    return;
-   }
    DB.ref(SYNC_PATH).once("value").then(snap=>{
     const remote=snap.val()||{};
     const local=snapshotForSync();
@@ -469,6 +481,12 @@ function totalUnread(u){
  contactsOf(u).forEach(id=>n+=unreadWith(u,id));
  if(hasDm(u.id,"admin"))n+=unreadWith(u,"admin");
  return n}
+// Бейджи "новое" на вкладках админа (по тому же принципу, что и цифра в кружке у непрочитанных сообщений
+// в чате выше): каждая вкладка хранит отметку "просмотрено до такого момента" в u.lastSeen, а бейдж - это
+// количество записей, появившихся ПОСЛЕ этой отметки. Отметка обновляется, пока вкладка открыта (см. render()).
+function newWdCount(u){return wd.filter(x=>(x.ts||0)>(u.lastSeen.wd||0)).length}
+function newPartnersCount(u){return Object.values(U).filter(x=>x.id!="admin"&&x.reg&&(x.regTs||0)>(u.lastSeen.partners||0)).length}
+function newLeadsCount(u){return leads.filter(l=>(l.ts||0)>(u.lastSeen.leads||0)).length}
 function newP(){n++;const id="p"+n;U[id]=mk(id,"",false,null);cur=id;render()}
 let _copiedCodes={};
 function cp(t){
@@ -667,6 +685,26 @@ function lockPinTap(n){const u=U[cur];if(u.blocked)return;if(u.lockPinBuf.length
  }
  render()}
 function lockPinDel(){const u=U[cur];u.lockPinBuf=u.lockPinBuf.slice(0,-1);u.lockPinResult=null;render()}
+// Создание НОВОГО код-пароля прямо на экране блокировки (ник уже подтвержден, но u.pin сброшен администратором
+// через "Разблокировать", см. adminUnblockPartner) - повторяет тот же цикл "придумайте/повторите", что и при
+// обычной первичной активации профиля (см. pinTap()), но работает поверх lock-полей, а не полей онбординга,
+// и по завершении сразу снимает блокировку экрана (не нужно еще раз вводить только что созданный пароль).
+function lockPinCreateTap(n){const u=U[cur];if(u.lockPinBuf.length>=4)return;u.lockPinBuf+=n;u.lockErr="";u.lockPinResult=null;
+ if(u.lockPinBuf.length==4){
+  if((u.lockPinStage||"enter")=="enter"){
+   render();setTimeout(()=>{u.lockPinFirst=u.lockPinBuf;u.lockPinStage="confirm";u.lockPinBuf="";render()},300);return;
+  }else{
+   if(u.lockPinBuf==u.lockPinFirst){
+    u.lockPinResult="ok";render();
+    setTimeout(()=>{u.pin=u.lockPinBuf;u.pinAttempts=0;u.blocked=false;u.locked=false;u.lockStage="nick";u.lockPinBuf="";u.lockPinResult=null;u.lockPinStage="enter";u.lockPinFirst=null;render()},500);return;
+   }else{
+    u.lockPinResult="err";render();
+    setTimeout(()=>{u.lockErr="Коды не совпадают. Придумайте новый код-пароль.";u.lockPinStage="enter";u.lockPinFirst=null;u.lockPinBuf="";u.lockPinResult=null;render()},600);return;
+   }
+  }
+ }
+ render()}
+function lockPinCreateDel(){const u=U[cur];u.lockPinBuf=u.lockPinBuf.slice(0,-1);u.lockPinResult=null;render()}
 function toggleSvInfo(uid,name){const u=U[uid];u.svOpen=u.svOpen||{};u.svOpen[name]=!u.svOpen[name];render()}
 function svInfoModal(u){
  return `<div class="modal-backdrop"><div class="modal">
@@ -678,7 +716,7 @@ function blockedView(u){
  const inv=u.inv&&U[u.inv]?U[u.inv]:null;
  if(u.blockedChatOpen&&inv){
   const msgs=dm.filter(x=>(x.a==u.id&&x.b==inv.id)||(x.a==inv.id&&x.b==u.id)).sort((a,b)=>a.ts-b.ts);
-  return `<div style="display:flex;flex-direction:column;height:100%">
+  return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">
  <div class="r" style="margin-bottom:8px"><button onclick="U['${u.id}'].blockedChatOpen=false;render()">← Назад</button></div>
  <div id="cl" style="flex:1;overflow-y:auto">${msgs.map(x=>`<div class="b ${x.from==u.id?"me":""}">${esc(x.text)}</div>`).join("")||`<div class="mu">Сообщений пока нет. Напишите ${esc(inv.nick)}.</div>`}</div>
  <div class="r" style="margin-top:6px"><input id="dmin" placeholder="Сообщение: ${esc(inv.nick)}" onkeydown="if(event.key=='Enter')sendDmBlocked()"><button class="p" onclick="sendDmBlocked()">➤</button></div>
@@ -690,15 +728,21 @@ function blockedView(u){
  </div>`}
 function chatLocked(u){
  if(u.blocked)return blockedView(u);
- if(u.lockStage=="nick")return `<div style="display:flex;flex-direction:column;height:100%">
+ if(u.lockStage=="nick")return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">
  <div class="r" style="margin-top:0"><input id="lkn" placeholder="Сообщение" onkeydown="if(event.key=='Enter')lockNickSubmit()"><button class="p" onclick="lockNickSubmit()">➤</button></div>
  <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.lockErr||"")}</div>
  <div id="cl" style="flex:1;overflow-y:auto"></div></div>`;
- return `<div style="display:flex;flex-direction:column;height:100%">
- <div class="c" style="text-align:center;margin-top:0"><b>Введите пароль</b>
+ // Если код-пароль отсутствует (сброшен администратором через "Разблокировать", см. adminUnblockPartner) -
+ // вместо ввода старого пароля партнеру предлагается придумать новый, тем же экраном "придумайте/повторите",
+ // что и при первичной активации профиля (gate()/pinTap()), но без повторного запроса ника и кода приглашения.
+ const creating=!u.pin;
+ const tapFn=creating?"lockPinCreateTap":"lockPinTap",delFn=creating?"lockPinCreateDel":"lockPinDel";
+ const title=creating?((u.lockPinStage||"enter")=="confirm"?"Повторите код-пароль":"Придумайте код-пароль"):"Введите пароль";
+ return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">
+ <div class="c" style="text-align:center;margin-top:0"><b>${title}</b>
  <div class="pin">${[0,1,2,3].map(i=>`<span class="${u.lockPinBuf.length>i?"f":""}"></span>`).join("")}</div>
  <div class="mu" style="color:#c0392b;min-height:16px">${esc(u.lockErr||"")}</div>
- <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button onclick="lockPinTap('${n}')">${n}</button>`).join("")}<button class="stat ${u.lockPinResult||""}" disabled>${u.lockPinResult=="ok"?"✓":u.lockPinResult=="err"?"✕":""}</button><button onclick="lockPinTap('0')">0</button><button onclick="lockPinDel()">⌫</button></div></div>
+ <div class="pad">${[1,2,3,4,5,6,7,8,9].map(n=>`<button onclick="${tapFn}('${n}')">${n}</button>`).join("")}<button class="stat ${u.lockPinResult||""}" disabled>${u.lockPinResult=="ok"?"✓":u.lockPinResult=="err"?"✕":""}</button><button onclick="${tapFn}('0')">0</button><button onclick="${delFn}()">⌫</button></div></div>
  <div id="cl" style="flex:1;overflow-y:auto"></div></div>`}
 function stColor(st){
  if(["Ждем подтверждения клиента","Первый контакт состоялся","Договорились о встрече","Не отвечает"].includes(st))return"st-grey";
@@ -746,7 +790,7 @@ function addLead(){
  else if(u.errPhone)u.errFocus="p";
  else if(u.errComment)u.errFocus="cm";
  if(u.errFio||u.errPhone||u.errComment||u.errContact)return render();
- if(leads.some(l=>l.ph.replace(/\D/g,"")==p.replace(/\D/g,""))){u.errPhone="Клиент уже передан (защита от дублей).";u.errFocus="p";return render()}
+ if(leads.some(l=>l.ph.replace(/\D/g,"")==p.replace(/\D/g,""))){u.errPhone="Клиент уже передан.";u.errFocus="p";return render()}
  leads.push({id:genNumId(),o:cur,fio:f,ph:p,sv:s,cm,st:MAIN[0],price:0,priceCurrent:0,rw:0,paid:0,note:"",ts:Date.now()});
  u.form=false;u.lf="";u.lp="";u.lcm="";u.lw="";u.ls=SV[0];
  bot(cur,"Заявка создана! ✅\n"+f+"\n"+p+"\n"+s+"\nСтатус: "+MAIN[0]);render()}
@@ -803,13 +847,13 @@ function wdSubmit(){const u=U[cur];if(!wdFilled(u))return;
  const sum=+u.wdSum;
  wd.push({id:genId(),o:u.id,w:u.nick,name:u.name,fld:u.fld,s:sum,sys:u.wdSystem,stat:u.wdStatus,fields:{...u.wdFields},status:"pending",comment:"",ts:Date.now()});
  u.bal-=sum;u.wdForm=false;u.wdReqForm=false;u.wdFields={};u.wdSum="";u.wdStatus="";u.wdSystem="";
- bot(u.id,"Заявка на вывод средств успешно создана.");render()}
+ bot(u.id,"Заявка на вывод средств успешно создана. 🏦");render()}
 function wdSetOpen(i){wd[i]._open=!wd[i]._open;render()}
 function wdDecide(i,dec){
  const r=wd[i];if(r.status!=="pending")return;
  const c=$("wdc"+i);r.comment=c?c.value.trim():"";r.status=dec;
  const u=U[r.o];if(dec=="rejected")u.bal+=r.s;
- bot(r.o,(dec=="approved"?"Заявка на вывод "+rub(r.s)+" одобрена.":"Заявка на вывод "+rub(r.s)+" отклонена.")+(r.comment?"\nКомментарий: "+r.comment:""));
+ bot(r.o,(dec=="approved"?"Заявка на вывод "+rub(r.s)+" одобрена. 💰":"Заявка на вывод "+rub(r.s)+" отклонена. ❌")+(r.comment?"\nКомментарий: "+r.comment:""));
  render()}
 function contactsOf(u){const s=[];if(u.inv&&u.inv!="admin")s.push(u.inv);Object.values(U).forEach(x=>{if(x.id!="admin"&&x.inv==u.id)s.push(x.id)});return[...new Set(s)]}
 function hasDm(a,b){return dm.some(x=>(x.a==a&&x.b==b)||(x.a==b&&x.b==a))}
@@ -835,9 +879,19 @@ function render(){
   if(u.id=="admin"){if((u.chatSub||"support")=="support"&&u.activeChat&&U[u.activeChat])u.lastSeen[u.activeChat]=Date.now()}
   else{const key=(!u.activeChat||u.activeChat=="self")?"self":(u.activeChat=="faq"?null:u.activeChat);if(key)u.lastSeen[key]=Date.now()}
  }
+ // Пока админ находится на вкладке "Запросы"/"Партнеры"/"Заявки", она считается просмотренной "по текущий
+ // момент" - бейдж на ней гаснет сразу при открытии и снова появится только когда появится что-то НОВОЕ
+ // (новый запрос на вывод / новый партнер / новая заявка) уже после этого момента - тот же принцип, что и
+ // у непрочитанных сообщений в чате.
+ if(u.id=="admin"&&!u.locked){
+  if(u.tab=="Запросы")u.lastSeen.wd=Date.now();
+  if(u.tab=="Партнеры")u.lastSeen.partners=Date.now();
+  if(u.tab=="Заявки")u.lastSeen.leads=Date.now();
+ }
  const tabs=u.id=="admin"?["Запросы","Чаты","Заявки","Партнеры"]:["Профиль","Чаты","Заявки","Партнеры"];
  const ready=u.id=="admin"?!!u.pin:u.on; // готов к работе: у партнера после активации, у админа после того как задан код-пароль
- $("nv").innerHTML=tabs.map(t=>{const badge=t=="Чаты"&&totalUnread(u)>0?` <span class="badge">${totalUnread(u)}</span>`:"";return `<button ${(!ready||u.locked)?"disabled":""} class="${u.tab==t&&ready&&!u.locked?"on":""}" onclick="tab('${t}')">${t}${badge}</button>`}).join("");
+ const tabCount=t=>t=="Чаты"?totalUnread(u):u.id!="admin"?0:t=="Запросы"?newWdCount(u):t=="Партнеры"?newPartnersCount(u):t=="Заявки"?newLeadsCount(u):0;
+ $("nv").innerHTML=tabs.map(t=>{const cnt=tabCount(t);const badge=cnt>0?` <span class="badge">${cnt}</span>`:"";return `<button ${(!ready||u.locked)?"disabled":""} class="${u.tab==t&&ready&&!u.locked?"on":""}" onclick="tab('${t}')">${t}${badge}</button>`}).join("");
  $("bd").innerHTML=u.id=="admin"?(!u.pin?adminPinSetup(u):u.locked?chatLocked(u):({Чаты:admChatsView,Партнеры:admPartnersView,Заявки:admLeadsView,Запросы:admWdView}[u.tab||"Чаты"])()):!u.on?gate(u):u.locked?chatLocked(u):({Профиль:prof,Чаты:chat,Заявки:req,Партнеры:prt}[u.tab])(u);
  $("modal").innerHTML=u.svInfo?svInfoModal(u):"";
  const c=$("cl");if(c)c.scrollTop=c.scrollHeight;
@@ -872,7 +926,7 @@ function doReg(){const u=U[cur],nk=$("rn").value.trim(),nm=$("rm").value.trim(),
  if(fl&&/[A-Za-z0-9]/.test(fl))u.errField="Сфера деятельности должна быть на русском языке, без цифр.";
  if(u.errNick)u.errFocus="rn";else if(u.errName)u.errFocus="rm";else if(u.errField)u.errFocus="rf";
  if(u.errNick||u.errName||u.errField)return render();
- u.nick=nk[0]=="@"?nk:"@"+nk;u.name=nm;u.fld=fl;u.reg=true;u.rnVal="";u.rmVal="";u.rfVal="";render()}
+ u.nick=nk[0]=="@"?nk:"@"+nk;u.name=nm;u.fld=fl;u.reg=true;u.regTs=Date.now();u.rnVal="";u.rmVal="";u.rfVal="";render()}
 function act(){const u=U[cur],m=$("ac").value.trim().match(/^(\S+)$/i),k=m?codes.findIndex(x=>x.c==m[1].toUpperCase()):-1;
  if(k<0){u.err="Неверная команда или код уже использован.";return render()}
  if(codes[k].ts&&(serverNow()-codes[k].ts)>CODE_TTL_MS){codes.splice(k,1);u.err="Код устарел, просьба ввести новый код активации.";return render()}
@@ -968,7 +1022,7 @@ function chat(u){
  <button style="flex:1" class="${u.activeChat=="faq"?"p":""}" onclick="U['${u.id}'].activeChat='faq';render();scrollFaqTop()">❓ Частые вопросы</button>
  </div>`;
  if(u.activeChat=="faq"){
-  return `<div style="display:flex;flex-direction:column;height:100%">${switcher}<div class="faqtabs">
+  return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">${switcher}<div class="faqtabs">
  <button class="${(u.faqTab||"reward")=="reward"?"p":""}" onclick="U['${u.id}'].faqTab='reward';render();scrollFaqTop()">Вознаграждение</button>
  <button class="${u.faqTab=="partners"?"p":""}" onclick="U['${u.id}'].faqTab='partners';render();scrollFaqTop()">Партнеры</button>
  </div>
@@ -980,11 +1034,11 @@ function chat(u){
   const emptyTxt=isSupport?"Сообщений пока нет. Напишите в поддержку.":`Сообщений пока нет. Напишите ${esc(other.nick)}.`;
   const placeholderTxt=isSupport?"Сообщение в поддержку":`Сообщение: ${esc(other.nick)}`;
   const msgs=dm.filter(x=>(x.a==u.id&&x.b==other.id)||(x.a==other.id&&x.b==u.id)).sort((a,b)=>a.ts-b.ts);
-  return `<div style="display:flex;flex-direction:column;height:100%">${switcher}<div id="cl" style="flex:1;overflow-y:auto">${msgs.map(x=>`<div class="b ${x.from==u.id?"me":""}">${esc(x.text)}</div>`).join("")||`<div class="mu">${emptyTxt}</div>`}</div>
+  return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">${switcher}<div id="cl" style="flex:1;overflow-y:auto">${msgs.map(x=>`<div class="b ${x.from==u.id?"me":""}">${esc(x.text)}</div>`).join("")||`<div class="mu">${emptyTxt}</div>`}</div>
  <div class="r" style="margin-top:6px"><input id="dmin" placeholder="${placeholderTxt}" onkeydown="if(event.key=='Enter')sendDm()"><button class="p" onclick="sendDm()">➤</button></div>${extra}</div>`;
  }
  const m=u.msgs.map((x,i)=>`<div class="b ${x.me?"me":""}">${esc(x.t)}${x.b?`<button class="p" style="display:block;margin-top:12px" onclick="ackAny(${i})">Ознакомился</button>`:""}${x.lead?`<button class="p" style="display:block;margin-top:12px" onclick="U['${u.id}'].form=true;U['${u.id}'].tab='Заявки';render()">Создать заявку</button>`:""}</div>`).join("");
- return `<div style="display:flex;flex-direction:column;height:100%">${switcher}<div id="cl" style="flex:1;overflow-y:auto">${m||'<div class="mu">Чат пуст. Отправьте код приглашения.</div>'}</div>
+ return `<div style="position:absolute;inset:0;display:flex;flex-direction:column">${switcher}<div id="cl" style="flex:1;overflow-y:auto">${m||'<div class="mu">Чат пуст. Отправьте код приглашения.</div>'}</div>
  <div class="r" style="margin-top:6px"><input id="in" placeholder="${u.on?"Сообщение":"XXXX-XXXX"}" onkeydown="if(event.key=='Enter')send()"><button class="p" onclick="send()">➤</button></div>${extra}</div>`}
 function leadDetail(u,l){
  const mi=MAIN.indexOf(l.st),unlocked=mi>=4;
@@ -1015,6 +1069,34 @@ function leadDetail(u,l){
  <div class="lrow"><span>Вознаграждение</span><span class="ok">${unlocked?rewardTxt:"—"}</span></div>
  </div></div>
  ${!unlocked?`<div class="mu">Полная информация появится, когда заявка будет принята в работу.</div>`:""}`}
+function reqLeadsListHtml(u){
+ const filterStatus=u.leadFilterStatus||"",searchFio=(u.leadSearchFio||"").trim().toLowerCase();
+ const r=leads.filter(l=>l.o==u.id).filter(l=>{
+  if(filterStatus&&l.st!==filterStatus)return false;
+  if(searchFio&&!(l.fio||"").toLowerCase().includes(searchFio))return false;
+  return true;
+ }).map(l=>{
+ const mi=MAIN.indexOf(l.st),unlocked=mi>=4;
+ return `<div class="c lcard">
+ <div class="lrow"><span>ФИО</span><span><b>${esc(l.fio)}</b></span></div>
+ <div style="margin-top:6px"><span class="tag ${stColor(l.st)}">${l.st}</span></div>
+ <div class="lrow" style="margin-top:6px"><span>Способ продажи</span><span>${l.sv}</span></div>
+ ${l.priceCurrent?`<div class="lrow"><span>Цена текущая</span><span>${rub(l.priceCurrent)}</span></div>`:""}
+ ${l.paid?`<div class="lrow"><span>Цена продажи</span><span>${rub(l.price)}</span></div><div class="lrow"><span>Вознаграждение</span><span class="ok">${rub(l.rw)}</span></div>`:""}
+ ${l.note?`<div class="lrow"><span>Комментарий</span><span>${esc(l.note)}</span></div>`:""}
+ <button style="width:100%;margin-top:8px" ${unlocked?"":"disabled"} onclick="U['${u.id}'].leadView=${l.id};render()">Перейти в заявку</button>
+ ${!unlocked?'<div class="mu" style="margin-top:4px;text-align:center">Доступно после статуса «Принят в работу»</div>':""}
+ </div>`}).join("");
+ return r||'<div class="mu">Заявок пока нет.</div>'}
+function partnerLeadSearchInput(uid,v){
+ // Тот же прием, что и в leadSearchInput() у администратора (см. ниже): вместо полного render(), который
+ // пересоздал бы сам DOM-элемент поля ввода на каждое нажатие клавиши и сбивал бы фокус/курсор/клавиатуру
+ // на телефоне, обновляем ТОЛЬКО список заявок (#pLeadsList) - поле ввода никогда не пересоздается, и
+ // партнер может спокойно дописывать ФИО целиком, а подходящие заявки обновляются "на лету" под ним.
+ U[uid].leadSearchFio=v;
+ const el=document.getElementById("pLeadsList");
+ if(el)el.innerHTML=reqLeadsListHtml(U[uid]);
+}
 function req(u){
  if(u.leadView){
   const l=leads.find(x=>x.id==u.leadView&&x.o==u.id);
@@ -1031,19 +1113,16 @@ function req(u){
  <label class="mu"><input type="radio" name="w" value="self" ${u.lw=="self"?"checked":""} onchange="U['${u.id}'].lw=this.value" style="width:auto"> Клиент сам позвонит.</label>
  <div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errContact||"")}</div>
  <div class="r" style="margin-top:16px"><button class="p" onclick="addLead()">Отправить</button><button onclick="U['${u.id}'].form=false;render()">Отмена</button></div></div>`:`<button class="p" style="width:100%;margin-bottom:8px" onclick="U['${u.id}'].form=true;render()">➕ Создать заявку</button>`;
- const r=leads.filter(l=>l.o==u.id).map(l=>{
- const mi=MAIN.indexOf(l.st),unlocked=mi>=4;
- return `<div class="c lcard">
- <div class="lrow"><span>ФИО</span><span><b>${esc(l.fio)}</b></span></div>
- <div style="margin-top:6px"><span class="tag ${stColor(l.st)}">${l.st}</span></div>
- <div class="lrow" style="margin-top:6px"><span>Способ продажи</span><span>${l.sv}</span></div>
- ${l.priceCurrent?`<div class="lrow"><span>Цена текущая</span><span>${rub(l.priceCurrent)}</span></div>`:""}
- ${l.paid?`<div class="lrow"><span>Цена продажи</span><span>${rub(l.price)}</span></div><div class="lrow"><span>Вознаграждение</span><span class="ok">${rub(l.rw)}</span></div>`:""}
- ${l.note?`<div class="lrow"><span>Комментарий</span><span>${esc(l.note)}</span></div>`:""}
- <button style="width:100%;margin-top:8px" ${unlocked?"":"disabled"} onclick="U['${u.id}'].leadView=${l.id};render()">Перейти в заявку</button>
- ${!unlocked?'<div class="mu" style="margin-top:4px;text-align:center">Доступно после статуса «Принят в работу»</div>':""}
- </div>`}).join("");
- return f+(r||'<div class="mu">Заявок пока нет.</div>')}
+ const hasAny=leads.some(l=>l.o==u.id);
+ const controls=hasAny?`<div class="c">
+ <div class="r" style="flex-wrap:wrap;gap:8px">
+ <select style="flex:1;min-width:150px" onchange="U['${u.id}'].leadFilterStatus=this.value;render()">
+ <option value="">Все статусы</option>
+ ${[...MAIN,...PAUSE].map(s=>`<option value="${s}" ${(u.leadFilterStatus||"")==s?"selected":""}>${s}</option>`).join("")}
+ </select>
+ <input id="pLeadSearchFio" style="flex:1;min-width:150px" placeholder="Поиск по ФИО" value="${esc(u.leadSearchFio||"")}" oninput="partnerLeadSearchInput('${u.id}',this.value)">
+ </div></div>`:"";
+ return f+controls+`<div id="pLeadsList">${reqLeadsListHtml(u)}</div>`}
 function prt(u){
  if(u.viewPartner&&U[u.viewPartner]&&U[u.viewPartner].inv==u.id){
   const p=U[u.viewPartner];
@@ -1104,6 +1183,20 @@ function admChatsView(){
  <button style="flex:1" class="${a.chatSub=="pairs"?"p":""}" onclick="U.admin.chatSub='pairs';render()">👥 Между партнерами</button>
  </div>`;
  return sub+(a.chatSub=="pairs"?adminPairChats():adminSupportChat())}
+function adminUnblockPartner(uid){
+ if(U[cur].id!=="admin")return;
+ const p=U[uid];if(!p)return;
+ // Поля блокировки экрана (locked/lockStage/lockPinBuf и т.д.) - чисто локальное состояние конкретного
+ // устройства партнера и никогда не синхронизируются между устройствами (см. snapshotForSync) - это
+ // намеренно, иначе действия на ОДНОМ устройстве могли бы сами открывать/закрывать экран блокировки на
+ // ДРУГОМ. Поэтому здесь сбрасываются только синхронизируемые поля (pin/pinAttempts/blocked). При следующем
+ // входе партнера в приложение (а мини-приложение Telegram перезапускается при каждом открытии) сработает
+ // обычная автоблокировка уже активированного профиля (см. ready0/_firstSyncApplied) - партнер увидит экран
+ // "ник", а т.к. синхронизированный код-пароль пуст, вместо ввода старого пароля ему предложат придумать
+ // новый (см. chatLocked()/lockPinCreateTap()), под тем же ником.
+ p.pin=null;p.pinAttempts=0;p.blocked=false;p.blockedChatOpen=false;
+ render();
+}
 function admPartnersView(){
  if(U.admin.viewPartner&&U[U.admin.viewPartner]){
   const p=U[U.admin.viewPartner];
@@ -1115,13 +1208,16 @@ function admPartnersView(){
  ${l.note?`<div class="lrow"><span>Комментарий</span><span>${esc(l.note)}</span></div>`:""}
  </div>`).join("")||'<div class="mu">Заявок пока нет.</div>';
   return `<button onclick="U.admin.viewPartner=null;render()">← Назад к партнерам</button>
- <div class="c"><b>${p.nick}</b><div class="mu">${esc(p.name)||"—"} · ${esc(p.fld)||"—"}</div></div>${ls}`;
+ <div class="c"><div class="r" style="justify-content:space-between;align-items:center">
+ <div><b>${p.nick}</b><div class="mu">${esc(p.name)||"—"} · ${esc(p.fld)||"—"}</div></div>
+ ${p.blocked?`<button style="background:#dc2626;color:#fff;border-color:#dc2626" onclick="adminUnblockPartner('${p.id}')">Разблокировать</button>`:""}
+ </div></div>${ls}`;
  }
  const list=Object.values(U).filter(x=>x.id!="admin"&&x.reg).map(p=>{
   const inv=p.inv?(p.inv=="admin"?"администратора":U[p.inv].nick):"—";
   const ls=leads.filter(l=>l.o==p.id),deals=ls.filter(l=>l.paid),profit=deals.reduce((a,l)=>a+(l.rw||0),0),refs=Object.values(U).filter(x=>x.inv==p.id).length,last=ls.length?Math.max(...ls.map(l=>l.ts||0)):0;
   return `<div class="c" style="cursor:pointer" onclick="U.admin.viewPartner='${p.id}';render()">
- <div style="font-weight:600">${p.nick}${p.on?"":" ⏳"}</div>
+ <div style="font-weight:600">${p.nick}${p.on?"":" ⏳"}${p.blocked?' <span class="tag st-red">Заблокирован</span>':""}</div>
  <div class="mu">${esc(p.name)||"—"} · ${esc(p.fld)||"—"} · от ${inv}</div>
  <table style="margin-top:8px"><tr><th>Заявки</th><th>Сделки</th><th>Прибыль</th><th>Реферал</th><th>Активность</th></tr>
  <tr><td>${ls.length}</td><td>${deals.length}</td><td>${rub(profit)}</td><td>${refs}</td><td class="mu">${fmtAgo(last)}</td></tr></table></div>`}).join("")||'<div class="mu">Нет зарегистрированных партнеров</div>';
@@ -1160,14 +1256,17 @@ function adminResetAll(){
 }
 function toggleLead(i){leads[i]._expanded=!leads[i]._expanded;render()}
 function leadSearchInput(v){
- // render() всегда полностью перестраивает innerHTML, поэтому обычный oninput+render() для текстового поля
- // "убивал" бы фокус/курсор на каждое нажатие клавиши (так же, как это уже учтено в остальных текстовых полях
- // приложения, которые НЕ вызывают render() прямо из oninput). Здесь фильтрация обязана обновляться "на лету",
- // поэтому render() вызывается, но сразу после пересборки DOM фокус и позиция курсора (конец строки)
- // восстанавливаются вручную на новый одноименный элемент - тот же прием, что и в fix_v2_caret_redraw_forcing.
- U.admin.leadSearchFio=v;render();
- const doRestore=()=>{try{const el=document.getElementById("leadSearchFio");if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length)}}catch(e){}};
- (window.requestAnimationFrame||setTimeout)(doRestore,0);
+ // РАНЬШЕ: render() всегда полностью перестраивает innerHTML, поэтому обычный oninput+render() уничтожал бы
+ // сам DOM-элемент поля ввода на каждое нажатие клавиши, а фокус/курсор приходилось восстанавливать вручную
+ // (focus()+setSelectionRange на конец строки). На практике это оказалось ненадежным на телефонах - после
+ // программного focus() виртуальная клавиатура иногда закрывается/мигает, и это реально прерывало набор
+ // текста администратором ровно так, как было описано в жалобе ("поиск... не сбрасывает возможность
+ // текущего ввода" - админ должен успевать дописать ФИО целиком, а подходящие варианты подтягиваются сами).
+ // ИСПРАВЛЕНИЕ: вместо полного render() обновляем ТОЛЬКО список заявок (#admLeadsList) - поле ввода
+ // никогда не пересоздается, поэтому фокус и позиция курсора сохраняются сами собой, без каких-либо хаков.
+ U.admin.leadSearchFio=v;
+ const el=document.getElementById("admLeadsList");
+ if(el)el.innerHTML=admLeadsListHtml();
 }
 let _clearLeadsArmed=0,_clearLeadsArmTimer=null;
 function adminClearLeadsHistory(){
@@ -1184,7 +1283,23 @@ function adminClearLeadsHistory(){
  leads=[];
  render();
 }
-function admLeadsView(){
+let _selLeads={};
+function toggleLeadSelect(id){
+ if(_selLeads[id])delete _selLeads[id];else _selLeads[id]=true;
+ render();
+}
+function adminDeleteSelectedLeads(){
+ if(U[cur].id!=="admin")return;
+ if(!Object.keys(_selLeads).length)return;
+ // Точечное удаление выбранных заявок - это тоже намеренное удаление персональных данных, как и "Очистить
+ // историю"/"Сбросить все тестовые данные", поэтому слияние (см. scheduleSync) здесь так же недопустимо -
+ // иначе удаленные заявки "воскреснут" при следующей синхронизации с другого устройства.
+ _forceFullOverwrite=true;
+ leads=leads.filter(l=>!_selLeads[l.id]);
+ _selLeads={};
+ render();
+}
+function admLeadsListHtml(){
  const au=U.admin;
  // Номер заявки для отображения - это НЕ внутренний уникальный id (он нужен только для надежного слияния
  // при синхронизации между устройствами, см. sync_overwrite_race_condition_fix_oct22, и может быть большим
@@ -1193,31 +1308,22 @@ function admLeadsView(){
  const leadsByTs=[...leads].sort((a,b)=>(a.ts||0)-(b.ts||0));
  const leadOrderNum={};leadsByTs.forEach((x,idx)=>{leadOrderNum[x.id]=idx+1});
  const filterStatus=au.leadFilterStatus||"",searchFio=(au.leadSearchFio||"").trim().toLowerCase();
- const controls=`<div class="c">
- <div class="r" style="flex-wrap:wrap;gap:8px">
- <select style="flex:1;min-width:150px" onchange="U.admin.leadFilterStatus=this.value;render()">
- <option value="">Все статусы</option>
- ${[...MAIN,...PAUSE].map(s=>`<option value="${s}" ${filterStatus==s?"selected":""}>${s}</option>`).join("")}
- </select>
- <input id="leadSearchFio" style="flex:1;min-width:150px" placeholder="Поиск по ФИО" value="${esc(au.leadSearchFio||"")}" oninput="leadSearchInput(this.value)">
- </div>
- <button style="width:100%;margin-top:10px;${_clearLeadsArmed>0?"background:#dc2626;color:#fff;border-color:#dc2626":"border-color:#dc2626;color:#dc2626"}" onclick="adminClearLeadsHistory()">${_clearLeadsArmed==0?"🗑 Очистить историю":_clearLeadsArmed==1?"⚠️ Нажмите еще раз (1/2)":"⚠️ Нажмите последний раз для подтверждения (2/2)"}</button>
- </div>`;
- const l=leads.map((x,i)=>{const o=U[x.o],ref=o.inv&&o.inv!="admin"?U[o.inv]:null;
+ return leads.map((x,i)=>{const o=U[x.o],ref=o.inv&&o.inv!="admin"?U[o.inv]:null;
  if(filterStatus&&x.st!==filterStatus)return "";
  if(searchFio&&!(x.fio||"").toLowerCase().includes(searchFio))return "";
  const priceVal=x.priceCurrent?(+x.priceCurrent).toLocaleString("ru-RU"):"";
  const renoOpts=["","есть","нет","требуется"];
+ const sel=`<label style="position:absolute;top:8px;right:8px;cursor:pointer"><input type="checkbox" style="width:auto" ${_selLeads[x.id]?"checked":""} onchange="toggleLeadSelect(${x.id})"></label>`;
  const head=`<div>№${leadOrderNum[x.id]}</div><b>${esc(x.fio)}</b><div>${esc(x.ph)}</div><div class="mu" style="margin-top:2px">${x.sv} · от ${o.nick}${ref?` (${ref.nick})`:""}</div>`;
  if(!x._expanded){
-  return `<div class="c">${head}
+  return `<div class="c" style="position:relative">${sel}${head}
  <div style="margin-top:6px"><span class="tag ${stColor(x.st)}">${x.st}</span></div>
  ${x.priceCurrent?`<div class="mu" style="margin-top:4px">Цена текущая: ${rub(x.priceCurrent)}</div>`:""}
  ${x.paid?`<div class="mu" style="margin-top:2px">Цена продажи: ${rub(x.price)}</div>`:""}
  <button style="width:100%;margin-top:10px" onclick="toggleLead(${i})">Перейти в заявку</button>
  </div>`;
  }
- return `<div class="c">${head}
+ return `<div class="c" style="position:relative">${sel}${head}
  <button style="margin-top:6px" onclick="toggleLead(${i})">Свернуть</button>
  <select id="st${i}" style="margin-top:10px">${[...MAIN,...PAUSE].map(s=>`<option ${s==x.st?"selected":""}>${s}</option>`).join("")}</select>
  <input id="pr${i}" type="text" inputmode="numeric" placeholder="Текущая цена, ₽" value="${priceVal}" oninput="fmtThousands(this)">
@@ -1228,8 +1334,23 @@ function admLeadsView(){
  <div class="r"><input id="yr${i}" placeholder="Год постройки" value="${esc(x.year||"")}"><select id="rv${i}">${renoOpts.map(r=>`<option value="${r}" ${r==(x.renovation||"")?"selected":""}>${r||"Ремонт: не указан"}</option>`).join("")}</select></div>
  <div class="r" style="align-items:center;margin-top:12px"><button class="p" onclick="upd(${i})">Применить</button>${x._applied?'<span class="ok">Отправлено ✓</span>':""}</div>
  ${x.paid?(x.credited?`<div class="mu" style="margin-top:6px"><span class="ok">Начислено на баланс: ${rub(x.rw)}</span></div>`:`<div class="r" style="margin-top:8px;align-items:center"><span class="mu">Вознаграждение ${rub(x.rw)} не начислено</span><button onclick="creditReward(${i})">Начислить на баланс</button></div>`):""}
- </div>`}).join("")||'<div class="mu">Заявок нет</div>';
- return `<div class="mu" style="color:#c0392b">${esc(U.admin.err||"")}</div>${controls}${l}`}
+ </div>`}).join("")||'<div class="mu">Заявок нет</div>'}
+function admLeadsView(){
+ const au=U.admin;
+ const filterStatus=au.leadFilterStatus||"";
+ const selCount=Object.keys(_selLeads).length;
+ const controls=`<div class="c">
+ <div class="r" style="flex-wrap:wrap;gap:8px">
+ <select style="flex:1;min-width:150px" onchange="U.admin.leadFilterStatus=this.value;render()">
+ <option value="">Все статусы</option>
+ ${[...MAIN,...PAUSE].map(s=>`<option value="${s}" ${filterStatus==s?"selected":""}>${s}</option>`).join("")}
+ </select>
+ <input id="leadSearchFio" style="flex:1;min-width:150px" placeholder="Поиск по ФИО" value="${esc(au.leadSearchFio||"")}" oninput="leadSearchInput(this.value)">
+ </div>
+ <button style="width:100%;margin-top:10px;${_clearLeadsArmed>0?"background:#dc2626;color:#fff;border-color:#dc2626":"border-color:#dc2626;color:#dc2626"}" onclick="adminClearLeadsHistory()">${_clearLeadsArmed==0?"🗑 Очистить историю":_clearLeadsArmed==1?"⚠️ Нажмите еще раз (1/2)":"⚠️ Нажмите последний раз для подтверждения (2/2)"}</button>
+ ${selCount?`<button style="width:100%;margin-top:8px;background:#dc2626;color:#fff;border-color:#dc2626" onclick="adminDeleteSelectedLeads()">🗑 Удалить выбранные (${selCount})</button>`:""}
+ </div>`;
+ return `<div class="mu" style="color:#c0392b">${esc(U.admin.err||"")}</div>${controls}<div id="admLeadsList">${admLeadsListHtml()}</div>`}
 function admWdView(){
  const FLABEL={inn:"ИНН",kpp:"КПП",rname:"Наименование получателя",rs:"Расчетный счет (р/с)",bank:"Банк получателя",bik:"БИК",ks:"Корр. счет",fio:"ФИО получателя",card:"Номер карты",wallet:"Номер кошелька ЮMoney"};
  const tag=x=>x.status=="pending"?'<span class="tag st-yellow">В обработке</span>':x.status=="approved"?'<span class="tag st-green">Одобрено</span>':'<span class="tag st-red">Отклонено</span>';

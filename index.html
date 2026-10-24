@@ -250,6 +250,8 @@ const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",
 function msgHighlight(t){
  // color:#000 (как и у плашек .tag.st-*) - без этого в темной теме светлый цвет текста (var(--tx)) был бы
  // плохо читаем на этих ярких/светлых фонах.
+ if(t.indexOf("Профиль успешно активирован")===0)return "background:#86efac;border-color:#22c55e;color:#000";
+ if(t.indexOf("Как создать заявку?")===0)return "background:#7dd3fc;border-color:#38bdf8;color:#000";
  if(t.indexOf("Ура! Сделка состоялась")===0)return "background:#7dd3fc;border-color:#38bdf8;color:#000";
  if(t.indexOf("Ваш баланс пополнен")>=0)return "background:#86efac;border-color:#22c55e;color:#000";
  if(t.indexOf("Заявка на вывод")===0&&t.indexOf("одобрена")>=0)return "background:#86efac;border-color:#22c55e;color:#000";
@@ -1063,7 +1065,10 @@ function render(){
  if(u.errFocus){const el=$(u.errFocus);if(el){el.focus();if(el.select)el.select()}u.errFocus=null}
  renderQR();
  if(!_applyingRemote)scheduleSync()}
-function steps(u){const a=["Регистрация","Активация","Обучение","Работа"],k=!u.reg?0:!u.on?1:u.msgs.some(m=>m.b)?2:3;return `<div class="st">${a.map((x,i)=>`<span class="${i==k?"on":i<k?"dn":""}">${i<k?"✓ ":""}${x}</span>`).join("")}</div>`}
+// Полоса шагов над формой регистрации/активации - оставлены только "Регистрация"/"Активация" (по запросу
+// убраны "Обучение"/"Работа"). Каждый <span> в .st уже имеет flex:1 (см. CSS), поэтому с двумя шагами вместо
+// четырех они автоматически растягиваются и занимают каждый половину ширины, без отдельных правок CSS.
+function steps(u){const a=["Регистрация","Активация"],k=!u.reg?0:!u.on?1:2;return `<div class="st">${a.map((x,i)=>`<span class="${i==k?"on":i<k?"dn":""}">${i<k?"✓ ":""}${x}</span>`).join("")}</div>`}
 function gate(u){
  if(!u.reg)return steps(u)+`<div class="c reg"><b>Регистрация партнера</b>
  <input id="rn" placeholder="Ник @ivan" value="${esc(u.rnVal||"")}" class="${u.errNick?"err-field":""}" oninput="U['${u.id}'].rnVal=this.value"><div class="mu" style="color:#c0392b;min-height:14px">${esc(u.errNick||"")}</div>

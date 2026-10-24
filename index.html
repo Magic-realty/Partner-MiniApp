@@ -59,7 +59,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:4px;borde
 .err-field{border-color:#dc2626!important;box-shadow:0 0 0 1px #dc2626}
 .lcard .lrow{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--bd)}
 .lcard .lrow:last-child{border-bottom:none}
-.lcard .lrow span:first-child{color:var(--mu)}
+.lcard .lrow>span:first-child{color:var(--mu)}
 .lcard .lrow span:last-child{text-align:right}
 .qa{padding:9px 0;border-bottom:1px solid var(--bd)}
 .qa:last-child{border-bottom:none}
@@ -969,7 +969,7 @@ function upd(i){
    const newLim=Math.min(TIERS[t].cap,Math.round(u.lim[t]*1.1));
    l.rw=u.lim[t];l._newLim=newLim;u.lim[t]=newLim;
    l.paid=1;l.credited=0;
-   bot(l.o,"Ура! Сделка состоялась. Зайдите во вкладку \"Заявки\", чтобы посмотреть подробнее: 🎉\n\n"+l.fio+"\n"+l.ph+"\n"+l.sv+"\nКатегория «"+TIERS[t].n+"»\nВаш лимит вырос: "+l._oldLim.toLocaleString("ru-RU")+" → "+newLim.toLocaleString("ru-RU")+".")
+   bot(l.o,"Ура! Сделка состоялась.\nЗайдите во вкладку \"Заявки\", чтобы посмотреть подробнее: 🎉\n\n"+l.fio+"\n"+l.ph+"\n"+l.sv+"\nКатегория «"+TIERS[t].n+"»\nВаш лимит увеличен: "+l._oldLim.toLocaleString("ru-RU")+" → "+newLim.toLocaleString("ru-RU")+".")
   }
  }else if(statusChanged||firstApply){
   bot(l.o,"Статус заявки изменился: 🔄\n"+l.fio+"\n"+l.ph+"\n"+l.sv+"\nСтатус: "+l.st+".");
@@ -981,8 +981,11 @@ function creditReward(i){
  const l=leads[i];if(!l.paid||l.credited)return;
  const u=U[l.o],t=l._tier;
  u.bal+=l.rw;l.credited=1;
- const rangeTxt=t==0?("до "+TIERS[0].max.toLocaleString("ru-RU")):("от "+TIERS[t-1].max.toLocaleString("ru-RU")+" до "+TIERS[t].max.toLocaleString("ru-RU"));
- bot(l.o,"Вознаграждение! 💸\nВаш баланс пополнен на "+Math.round(l.rw).toLocaleString("ru-RU")+" рублей!\nЗайдите в профиль, чтобы посмотреть достижения и получить выплату.\n\nВаш лимит в категории "+rangeTxt+"\nвырос: "+l._oldLim.toLocaleString("ru-RU")+" → "+l._newLim.toLocaleString("ru-RU"));
+ // Формат диапазона категории приведен к тому же виду, что в сообщении "Ура! Сделка состоялась" (TIERS[t].n,
+ // напр. "30–40 млн") вместо ранее использовавшегся полного написания чисел ("от 30 000 000 до 40 000 000") -
+ // см. oct24_message_about_screenshot.3_reward_message_text_and_range_format.
+ const rangeTxt="«"+TIERS[t].n+"»";
+ bot(l.o,"Вознаграждение! 💸\nВаш баланс пополнен на "+Math.round(l.rw).toLocaleString("ru-RU")+" рублей!\nЗайдите в профиль, чтобы посмотреть достижения и получить выплату.\n\nВаш лимит в категории "+rangeTxt+"\nувеличен: "+l._oldLim.toLocaleString("ru-RU")+" → "+l._newLim.toLocaleString("ru-RU")+".");
  if(u.inv&&u.inv!="admin"){const b=Math.round(l.rw*.1);U[u.inv].bal+=b;L.push({to:u.inv,from:l.o,sum:b});bot(u.inv,"Бонус партнера: +"+rub(b)+" за сделку "+u.nick)}
  render()}
 function wdSetStat(v){const u=U[cur];u.wdStatus=v;u.wdSystem=v=="ИП"?PAYSYS_IP:"";render()}

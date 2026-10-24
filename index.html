@@ -340,7 +340,13 @@ function snapshotForSync(){
   // activeChat/tab) - это защита от подбора код-пароля (см. lockPinTap/MAX_WRONG_PIN_ATTEMPTS), и блокировка
   // должна действовать одинаково на любом устройстве партнера, а не сбрасываться при переустановке/новом
   // устройстве/очистке локальных данных.
-  users[id]={reg:u.reg,nick:u.nick||"",name:u.name||"",fld:u.fld||"",on:u.on,codeOk:u.codeOk,inv:u.inv||null,pin:u.pin||null,bal:u.bal||0,lim:u.lim||[],msgs:(u.msgs||[]).map(sanitizeMsg),pinAttempts:u.pinAttempts||0,blocked:!!u.blocked,regTs:u.regTs||0,pinUpdatedAt:u.pinUpdatedAt||0};
+  // updatedAt (в отличие от pinUpdatedAt, который защищает ТОЛЬКО pin/pinAttempts/blocked) - общая метка
+  // времени для ОСТАЛЬНЫХ синхронизируемых полей партнера (on/bal/lim/reg/codeOk/inv/nick/name/fld/regTs).
+  // См. load_simulation_oct24/oct25 - fix_cross_partner_field_clobber: при нескольких одновременно активных
+  // партнерах устройство B, еще не получившее по подписке новость об активации партнера A, при своей ОБЫЧНОЙ
+  // синхронизации (слиянии) откатывало "on" партнера A обратно на false - локальная копия B всегда побеждала
+  // для этих полей, т.к. раньше для них не было никакой защиты по времени (только у pin/blocked она была).
+  users[id]={reg:u.reg,nick:u.nick||"",name:u.name||"",fld:u.fld||"",on:u.on,codeOk:u.codeOk,inv:u.inv||null,pin:u.pin||null,bal:u.bal||0,lim:u.lim||[],msgs:(u.msgs||[]).map(sanitizeMsg),pinAttempts:u.pinAttempts||0,blocked:!!u.blocked,regTs:u.regTs||0,pinUpdatedAt:u.pinUpdatedAt||0,updatedAt:u.updatedAt||0};
  });
  return {leads,wd,L,dm,codes,users,tombstones};
 }
@@ -380,8 +386,16 @@ function applyRemoteSnapshot(data){
   const lu=U[id],incoming=ru[id]||{};
   const ruNewer=(incoming.pinUpdatedAt||0)>(lu.pinUpdatedAt||0);
   const keepPin=lu.pin,keepAttempts=lu.pinAttempts,keepBlocked=lu.blocked,keepUpdatedAt=lu.pinUpdatedAt;
+  // Та же защита (см. комментарий выше и updatedAt в snapshotForSync()/scheduleSync()), но для ОСТАЛЬНЫХ
+  // синхронизируемых полей (on/bal/lim/reg/codeOk/inv/nick/name/fld/regTs) - см. load_simulation_oct25:
+  // без этого ЖИВОЕ обновление от чужого, более старого устройства могло так же откатить, например, "on"
+  // (статус активации) этого же партнера на его СОБСТВЕННОМ устройстве обратно, если входящий снимок устарел.
+  const genNewer=(incoming.updatedAt||0)>=(lu.updatedAt||0);
+  const keepGen={};
+  if(!genNewer)["reg","nick","name","fld","on","codeOk","inv","bal","lim","regTs","updatedAt"].forEach(f=>{keepGen[f]=lu[f]});
   Object.assign(U[id],incoming);
   if(!ruNewer){U[id].pin=keepPin;U[id].pinAttempts=keepAttempts;U[id].blocked=keepBlocked;U[id].pinUpdatedAt=keepUpdatedAt}
+  if(!genNewer)Object.assign(U[id],keepGen);
  });
 }
 function genNumId(){return Date.now()*1000+Math.floor(Math.random()*1000)}
@@ -492,6 +506,16 @@ function scheduleSync(){
      // remote - отсюда дублирование сообщения об активации, особенно заметное именно после нажатия
      // "Ознакомился". Исправлено: как и для leads/wd, используется слияние по стабильному id (mergeById).
      merged.users[id]=Object.assign({},ru,lu,{msgs:mergeById(ru.msgs,lu.msgs)});
+     // ОБЩАЯ защита по времени для остальных полей (on/bal/lim/reg/codeOk/inv/nick/name/fld/regTs) - см.
+     // updatedAt в snapshotForSync(). Без этого (как было раньше) здесь побеждала ЦЕЛИКОМ локальная версия
+     // лишь потому, что ЭТО устройство синхронизируется прямо сейчас - даже если его копия этого партнера
+     // устарела (например, устройство B еще не получило по подписке новость об активации партнера A, и его
+     // обычная синхронизация по ДРУГОЙ причине откатывала "on" партнера A обратно на false). Теперь, если
+     // remote новее локальной копии по updatedAt, remote-версия этих полей побеждает вместо локальной.
+     if(id!=="admin"&&(ru.updatedAt||0)>(lu.updatedAt||0)){
+      ["reg","nick","name","fld","on","codeOk","inv","bal","lim","regTs"].forEach(f=>{merged.users[id][f]=ru[f]});
+      merged.users[id].updatedAt=ru.updatedAt;
+     }
      // pin/pinAttempts/blocked - раньше здесь побеждала ЦЕЛИКОМ локальная версия (как и остальные поля), но
      // это ломало "Разблокировать" (adminUnblockPartner): если ДРУГОЕ устройство партнера успевало сделать
      // свой обычный sync со своей еще СТАРОЙ копией (старый pin) ПОСЛЕ того как админ уже сбросил пароль, но
@@ -653,7 +677,7 @@ function pinTap(n){const u=U[cur];if(u.pinBuf.length>=4)return;u.pinBuf+=n;u.err
   }else{
    if(u.pinBuf==u.pinFirst){
     u.pinResult="ok";render();
-    setTimeout(()=>{u.pin=u.pinBuf;u.pinUpdatedAt=serverNow();if(u.id=="admin"){/* админу не нужны шаги активации партнера/онбординг-сообщения */}else{u.on=true;u.tab="Чаты";bot(cur,ONB,1)}render()},500);return;
+    setTimeout(()=>{u.pin=u.pinBuf;u.pinUpdatedAt=serverNow();if(u.id=="admin"){/* админу не нужны шаги активации партнера/онбординг-сообщения */}else{u.on=true;u.updatedAt=serverNow();u.tab="Чаты";bot(cur,ONB,1)}render()},500);return;
    }else{
     u.pinResult="err";render();
     setTimeout(()=>{u.err="Коды не совпадают. Придумайте новый код-пароль.";u.pinStage="enter";u.pinFirst=null;u.pinBuf="";u.pinResult=null;render()},600);return;
@@ -967,7 +991,7 @@ function upd(i){
    l.price=newPriceCurrent;
    l._tier=t;l._oldLim=u.lim[t];
    const newLim=Math.min(TIERS[t].cap,Math.round(u.lim[t]*1.1));
-   l.rw=u.lim[t];l._newLim=newLim;u.lim[t]=newLim;
+   l.rw=u.lim[t];l._newLim=newLim;u.lim[t]=newLim;u.updatedAt=serverNow();
    l.paid=1;l.credited=0;
    bot(l.o,"Ура! Сделка состоялась.\nЗайдите во вкладку \"Заявки\", чтобы посмотреть подробнее: 🎉\n\n"+l.fio+"\n"+l.ph+"\n"+l.sv+"\nКатегория «"+TIERS[t].n+"»\nВаш лимит увеличен: "+l._oldLim.toLocaleString("ru-RU")+" → "+newLim.toLocaleString("ru-RU")+".")
   }
@@ -980,13 +1004,13 @@ function upd(i){
 function creditReward(i){
  const l=leads[i];if(!l.paid||l.credited)return;
  const u=U[l.o],t=l._tier;
- u.bal+=l.rw;l.credited=1;
+ u.bal+=l.rw;u.updatedAt=serverNow();l.credited=1;
  // Формат диапазона категории приведен к тому же виду, что в сообщении "Ура! Сделка состоялась" (TIERS[t].n,
  // напр. "30–40 млн") вместо ранее использовавшегся полного написания чисел ("от 30 000 000 до 40 000 000") -
  // см. oct24_message_about_screenshot.3_reward_message_text_and_range_format.
  const rangeTxt="«"+TIERS[t].n+"»";
  bot(l.o,"Вознаграждение! 💸\nВаш баланс пополнен на "+Math.round(l.rw).toLocaleString("ru-RU")+" рублей!\nЗайдите в профиль, чтобы посмотреть достижения и получить выплату.\n\nВаш лимит в категории "+rangeTxt+"\nувеличен: "+l._oldLim.toLocaleString("ru-RU")+" → "+l._newLim.toLocaleString("ru-RU")+".");
- if(u.inv&&u.inv!="admin"){const b=Math.round(l.rw*.1);U[u.inv].bal+=b;L.push({to:u.inv,from:l.o,sum:b});bot(u.inv,"Бонус партнера: +"+rub(b)+" за сделку "+u.nick)}
+ if(u.inv&&u.inv!="admin"){const b=Math.round(l.rw*.1);U[u.inv].bal+=b;U[u.inv].updatedAt=serverNow();L.push({to:u.inv,from:l.o,sum:b});bot(u.inv,"Бонус партнера: +"+rub(b)+" за сделку "+u.nick)}
  render()}
 function wdSetStat(v){const u=U[cur];u.wdStatus=v;u.wdSystem=v=="ИП"?PAYSYS_IP:"";render()}
 function wdSetSys(v){U[cur].wdSystem=v;render()}
@@ -1003,13 +1027,13 @@ function wdUpdateBtn(){const b=$("wdSubmitBtn");if(b)b.disabled=!wdFilled(U[cur]
 function wdSubmit(){const u=U[cur];if(!wdFilled(u))return;
  const sum=+u.wdSum;
  wd.push({id:genId(),o:u.id,w:u.nick,name:u.name,fld:u.fld,s:sum,sys:u.wdSystem,stat:u.wdStatus,fields:{...u.wdFields},status:"pending",comment:"",ts:Date.now()});
- u.bal-=sum;u.wdForm=false;u.wdReqForm=false;u.wdFields={};u.wdSum="";u.wdStatus="";u.wdSystem="";
+ u.bal-=sum;u.updatedAt=serverNow();u.wdForm=false;u.wdReqForm=false;u.wdFields={};u.wdSum="";u.wdStatus="";u.wdSystem="";
  bot(u.id,"Заявка на вывод средств успешно создана. 🏦");render()}
 function wdSetOpen(i){wd[i]._open=!wd[i]._open;render()}
 function wdDecide(i,dec){
  const r=wd[i];if(r.status!=="pending")return;
  const c=$("wdc"+i);r.comment=c?c.value.trim():"";r.status=dec;
- const u=U[r.o];if(dec=="rejected")u.bal+=r.s;
+ const u=U[r.o];if(dec=="rejected"){u.bal+=r.s;u.updatedAt=serverNow()}
  // Одобрение заявки на вывод означает, что реальная выплата партнеру произошла - поэтому все его сделки,
  // вознаграждение по которым уже начислено на баланс (credited), но еще не отмечены как выплаченные,
  // помечаются payout=true - у них появляется плашка "Выплачено" (см. payoutTags()) рядом с плашкой
@@ -1099,11 +1123,11 @@ function doReg(){const u=U[cur],nk=$("rn").value.trim(),nm=$("rm").value.trim(),
  if(fl&&/[A-Za-z0-9]/.test(fl))u.errField="Сфера деятельности должна быть на русском языке, без цифр.";
  if(u.errNick)u.errFocus="rn";else if(u.errName)u.errFocus="rm";else if(u.errField)u.errFocus="rf";
  if(u.errNick||u.errName||u.errField)return render();
- u.nick=nk[0]=="@"?nk:"@"+nk;u.name=nm;u.fld=fl;u.reg=true;u.regTs=Date.now();u.rnVal="";u.rmVal="";u.rfVal="";render()}
+ u.nick=nk[0]=="@"?nk:"@"+nk;u.name=nm;u.fld=fl;u.reg=true;u.regTs=Date.now();u.updatedAt=serverNow();u.rnVal="";u.rmVal="";u.rfVal="";render()}
 function act(){const u=U[cur],m=$("ac").value.trim().match(/^(\S+)$/i),k=m?codes.findIndex(x=>x.c==m[1].toUpperCase()):-1;
  if(k<0){u.err="Неверная команда или код уже использован.";return render()}
  if(codes[k].ts&&(serverNow()-codes[k].ts)>CODE_TTL_MS){codes.splice(k,1);u.err="Код устарел, просьба ввести новый код активации.";return render()}
- u.inv=codes[k].o;codes.splice(k,1);u.err="";u.codeOk=true;render()}
+ u.inv=codes[k].o;codes.splice(k,1);u.err="";u.codeOk=true;u.updatedAt=serverNow();render()}
 // Сканирование QR-кода приглашения камерой устройства - полностью внутри мини-приложения, через
 // нативный Telegram WebApp API (TG.showScanQrPopup), без браузерных разрешений getUserMedia и без
 // сторонних библиотек/сайтов: камеру и сам процесс сканирования показывает интерфейс самого Telegram.

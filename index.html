@@ -81,6 +81,17 @@ input[type=number]{-moz-appearance:textfield}
 <div class="row"><button onclick="doLock()">📴 Свернуть (партнер свернул приложение/заблокировал телефон)</button></div></div>
 <div class="frame"><div class="hd" id="hd"></div><div class="body" id="bd"></div><div class="nav" id="nv"></div><div id="modal"></div></div>
 <div id="fbDebug" style="position:fixed;bottom:4px;left:4px;z-index:9999;background:#000;color:#0f0;font-size:10px;line-height:1.3;padding:3px 6px;border-radius:4px;opacity:.85;max-width:94vw;word-break:break-all">FB: ...</div>
+<!-- Официальный SDK Telegram Mini Apps. ВАЖНО (найдено при разборе пропавшей кнопки "Открыть камеру"
+oct24): этого тега раньше не было вообще - window.Telegram.WebApp использовался в коде ниже в расчете на то,
+что сам клиент Telegram "подставит" этот объект самостоятельно без официального скрипта. На части версий/
+платформ клиент действительно делает это сам (поэтому базовые вещи - ready(), expand(), цвета темы - работали),
+но без официального SDK некоторые МЕТОДЫ (в частности showScanQrPopup - открытие встроенного сканера QR) могут
+быть недоступны или отсутствовать в "самодельной" версии объекта, которую клиент подставляет без скрипта - это,
+по всей видимости, и объясняет, почему кнопка сканирования то была видна, то пропала на одном и том же
+устройстве/партнере без каких-либо изменений в нашем коде: за это отвечает исключительно версия/поведение
+самого Telegram, а официальный скрипт - самый надежный способ гарантировать полный набор методов независимо
+от этого. -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-database-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-auth-compat.js"></script>

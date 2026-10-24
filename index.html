@@ -1211,7 +1211,7 @@ function chat(u){
  // заявкам и т.д.), а не переписка с кем-либо - поэтому поле ввода здесь убрано полностью (см. запрос убрать
  // возможность писать в "Мой чат"). Реальная переписка с поддержкой/другим партнером ведется через отдельные
  // вкладки переключателя выше (🆘 Поддержка / конкретный партнер) - там поле ввода остается как и было.
- const m=u.msgs.map((x,i)=>`<div class="b ${x.me?"me":""}" style="${msgHighlight(x.t)}">${esc(x.t)}${x.b?`<button class="p" style="display:block;margin-top:12px" onclick="ackAny(${i})">Ознакомился</button>`:""}${x.lead?`<button class="p" style="display:block;margin-top:12px" onclick="U['${u.id}'].form=true;U['${u.id}'].tab='Заявки';render()">Создать заявку</button>`:""}</div>`).join("");
+ const m=u.msgs.map((x,i)=>`<div class="b ${x.me?"me":""}" style="${msgHighlight(x.t)}">${esc(x.t)}${x.b?`<button class="p" style="display:block;margin-top:12px" onclick="ackAny(${i})">Ознакомился</button>`:""}${x.lead?`<button class="p" style="display:block;margin-top:12px;background:#22c55e;border-color:#22c55e" onclick="U['${u.id}'].form=true;U['${u.id}'].tab='Заявки';render()">Создать заявку</button>`:""}</div>`).join("");
  return `<div style="position:absolute;inset:10px;display:flex;flex-direction:column">${switcher}<div id="cl" style="flex:1;overflow-y:auto">${m||'<div class="mu">Чат пуст.</div>'}</div>${extra}</div>`}
 function leadDetail(u,l){
  const mi=MAIN.indexOf(l.st),unlocked=mi>=4;

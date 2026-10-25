@@ -200,7 +200,95 @@ const REAL_USER_ID=(IS_IN_TELEGRAM&&TG_USER&&TG_USER.id)?(IS_ADMIN_TG_ACCOUNT?"a
 // --- Общая база данных (Firebase Realtime Database): синхронизация заявок, кодов, балансов, выводов и переписки между устройствами ---
 const FIREBASE_CONFIG={apiKey:"AIzaSyAUlnUisb0Kp0LVKcwsjCR0xOELIKSKKmU",authDomain:"partner-miniapp.firebaseapp.com",databaseURL:"https://partner-miniapp-default-rtdb.europe-west1.firebasedatabase.app",projectId:"partner-miniapp",storageBucket:"partner-miniapp.firebasestorage.app",messagingSenderId:"456368165048",appId:"1:456368165048:web:2debc5c039b334fe8da44d"};
 const SYNC_PATH="state";
+// --- Разделение заявок (leads) и заявок на вывод (wd) по отдельным путям, ключованным по id владельца-партнера
+// (/leads/{partnerId}, /wd/{partnerId}), вместо единого общего блока "state", где раньше были leads/wd ВМЕСТЕ
+// со всеми остальными партнерами - см. stage1_oct25_split_leads_wd_by_owner. Устройство ОБЫЧНОГО партнера
+// теперь подписывается ТОЛЬКО на свой собственный путь (leads/{свой id}, wd/{свой id}) и физически не скачивает
+// данные остальных партнеров вообще (а не просто "не показывает" их на экране, как было раньше) - это и снижает
+// трафик (каждое действие рассылается только тому, кого оно касается, а не всем подряд), и устраняет саму
+// возможность для обычного партнера прочитать чужие данные (номера карт, имена клиентов) через консоль браузера
+// при обычном использовании приложения (см. аудит безопасности/симуляция атаки oct24). Устройство АДМИНА
+// (единственное, кому по смыслу приложения нужно видеть вообще всех) подписывается на ОБА пути целиком (корень
+// leads/ и wd/ - поддерево со всеми партнерами), как и раньше. users/dm/codes/L/tombstones остаются в общем
+// "state" без изменений в этом шаге (это отдельный, следующий шаг переработки).
+const LEADS_PATH="leads",WD_PATH="wd";
+// stage1_oct25_users_profiles_split: продолжение того же разделения, теперь для данных партнеров (U). Раньше
+// ВСЕ поля каждого партнера (включая PIN-код, полные номера карт для выплат и баланс) лежали одним общим
+// объектом внутри "state" и физически скачивались на устройство КАЖДОГО партнера при обычном использовании -
+// это самое чувствительное, что оставалось не защищено после разделения leads/wd. Теперь это разделено на:
+// 1) PROFILES_PATH ("profiles/{id}") - маленький ПУБЛИЧНЫЙ набор полей (nick/name/on/inv), который
+//    действительно нужен видеть другим партнерам (подпись в чате с рефералом/пригласившим, строка в списке
+//    "Мои партнеры", бейдж активации) - эти поля и до этого фактически были видны в интерфейсе другим
+//    партнерам, здесь просто физически отделены от чувствительных. ВСЕ устройства (и админ, и любой партнер)
+//    подписываются на ЭТОТ путь целиком - намеренно, это открытая "визитка", а не приватные данные.
+// 2) USERS_PATH ("users/{id}") - приватные поля (pin/pinAttempts/blocked/bal/lim/reg/fld/codeOk/regTs/msgs) -
+//    видны ТОЛЬКО самому партнеру (подписка на свой узел) и админу (подписка на корень, как и для leads/wd -
+//    админу по смыслу приложения нужно видеть/менять данные любого партнера для поддержки и управления).
+const PROFILES_PATH="profiles",USERS_PATH="users";
+// stage1_oct25_dm_split: завершение Этапа 1 (по явному решению пользователя "Доделать Этап 1: dm (переписка)") -
+// переписка (dm: чат партнера с поддержкой/админом И чат партнера с его рефералом/пригласившим) вынесена из
+// общего "state" в путь DM_PATH ("dm/{id}"). В отличие от leads/wd/users, у сообщения ДВА участника (a и b), а
+// не один владелец - поэтому: сообщение между партнером и АДМИНОМ хранится ОДНОЙ копией, по пути dm/{partnerId}
+// (админ и так видит его через подписку на корень, отдельного узла "dm/admin" не существует); сообщение МЕЖДУ
+// ДВУМЯ ПАРТНЕРАМИ (переписка с рефералом/пригласившим) хранится ДВУМЯ копиями - по dm/{A} И по dm/{B} - чтобы
+// КАЖДЫЙ из двух участников видел её через подписку только на свой собственный узел, без доступа к чужим
+// узлам. Админ подписывается на КОРЕНЬ dm/ целиком (как и для leads/wd/users) и схлопывает дубликаты партнер-
+// партнерских сообщений по стабильному id (см. новое поле id у каждого dm.push(), и mergeById() ниже) - без
+// этого у админа каждое такое сообщение показывалось бы дважды.
+const DM_PATH="dm";
+// stage1_oct25_codes_L_split: завершение Этапа 1 (по явному решению пользователя "Доделать Этап 1: codes/L") -
+// последнее, что оставалось в общем "state", вынесено в собственные пути. CODES_PATH ("codes/{id}") - у каждого
+// владельца не более ОДНОГО активного инвайт-кода (gen() заменяет предыдущий, как и раньше). Коды НЕЛЬЗЯ
+// ограничить подпиской "только свой узел" для партнера, как leads/wd/users: партнер, вводящий ЧУЖОЙ код при
+// регистрации (act()), не знает его владельца заранее и ищет код ПО ЗНАЧЕНИЮ среди ВСЕХ кодов - поэтому ВСЕ
+// устройства (и админ, и любой партнер) подписываются на ВЕСЬ корень CODES_PATH (как PROFILES_PATH), а ПИШЕТ
+// каждое устройство только в свой СОБСТВЕННЫЙ узел. Это все равно устраняет реальную уязвимость (одно устройство
+// больше не может целиком перезаписать ЧУЖОЙ код простой гонкой обычной синхронизации, как могло раньше в общем
+// массиве с правилом "локальная копия побеждает целиком") - единственное легитимное исключение - удаление
+// (использование при act()/устаревание по CODE_TTL_MS) ЧУЖОГО кода, которое делается БЕЗОПАСНО через
+// transaction()-слияние по значению кода (см. removeCodeFromOwnerPath() ниже), а не прямой перезаписью чужого узла.
+// L_PATH ("L/{id}") - история реферальных бонусов, принадлежит ПОЛУЧАТЕЛЮ бонуса (поле .to): подписка - как у
+// leads/wd/users (админ - весь корень, партнер - только свой узел). Запись ВСЕГДА кросс-владельческая (бонус
+// начисляется ПРИГЛАСИВШЕМУ (.to=u.inv), а не тому партнеру, чье устройство фактически выполняет действие
+// (creditReward(), l.o) - см. комментарий там) - делается БЕЗОПАСНО через transaction()+mergeById() по новому
+// стабильному id (добавлено к каждой записи), по тому же принципу, что и переписка между партнерами (DM_PATH).
+const CODES_PATH="codes",L_PATH="L";
 let DB=null,_applyingRemote=false,_syncTimer=null,_firstSyncApplied=false,_serverTimeOffset=0,_showLoadingGate=false;
+let _isAdminScope=false,_knownLeadOwners={},_knownWdOwners={},_firstLeadsSyncApplied=false,_firstWdSyncApplied=false,_leadsSyncTimer=null,_wdSyncTimer=null,_forceLeadsOverwrite=false,_forceWdOverwrite=false;
+let _knownUserOwners={},_knownProfileOwners={},_firstUsersSyncApplied=false,_firstProfilesSyncApplied=false,_usersSyncTimer=null,_profilesSyncTimer=null,_forceUsersOverwrite=false,_forceProfilesOverwrite=false;
+let _lastSyncedUsersJSON={},_lastSyncedProfilesJSON={};
+let _knownDmOwners={},_firstDmSyncApplied=false,_dmSyncTimer=null,_forceDmOverwrite=false,_lastSyncedDmJSON={};
+let _knownCodeOwners={},_firstCodesSyncApplied=false,_codesSyncTimer=null,_forceCodesOverwrite=false,_lastSyncedCodesJSON={};
+let _knownLOwners={},_firstLSyncApplied=false,_lSyncTimer=null,_forceLOverwrite=false,_lastSyncedLJSON={};
+// Экран блокировки при возврате (см. применение ниже, рядом с подпиской на USERS_PATH/PROFILES_PATH) раньше
+// срабатывал внутри подписки на SYNC_PATH("state"), т.к. нужные для него поля (pin у админа, on у партнера)
+// тогда лежали именно там. Теперь они переехали в отдельные пути (USERS_PATH/PROFILES_PATH соответственно),
+// каждый со своим собственным асинхронным первым приходом данных - поэтому проверка перенесена в ТОТ путь,
+// где реально лежит нужное полю (pin → USERS_PATH для админа, on → PROFILES_PATH для партнера), и защищена
+// отдельным флагом _firstIdentityGateApplied, чтобы сработать ровно один раз за сессию, а не при каждом
+// последующем живом обновлении.
+let _firstIdentityGateApplied=false;
+function applyLockGateOnce(){
+ if(_firstIdentityGateApplied)return;
+ _firstIdentityGateApplied=true;
+ const u0=U[cur];
+ const ready0=u0&&(u0.id==="admin"?!!u0.pin:u0.on);
+ if(ready0){u0.locked=true;u0.lockStage="nick";u0.lockPinBuf="";u0.lockErr=""}
+}
+// stage1_oct25_split_leads_wd_dirty_tracking: у АДМИНА (который видит/хранит ВСЕХ владельцев сразу) нельзя
+// на каждый render() заново перезаписывать (слиянием) ПУТИ ВСЕХ известных владельцев - под нагрузкой это
+// создает гонку: админ читает чужой путь, партнер в этот же момент пишет туда свою НОВУЮ заявку, и запись
+// админа (слияние со СТАРЫМ прочитанным состоянием) обгоняет и затирает её. Обнаружено реальной нагрузочной
+// симуляцией 20 партнеров (sim_load_split.js) - без этой защиты терялась примерно половина созданных заявок.
+// Решение: для каждого владельца храним JSON-отпечаток ТОГО, что он сейчас отражен (через собственную запись
+// ИЛИ через входящее обновление от Firebase) - и у админа реально отправляем (merge+set) только тех
+// владельцев, чей ЛОКАЛЬНЫЙ массив реально отличается от этого отпечатка (т.е. кого САМ админ только что
+// локально изменил - например upd()/creditReward()/wdDecide()), а не всех подряд.
+let _lastSyncedLeadsJSON={},_lastSyncedWdJSON={};
+// Кэш заявок РЕФЕРАЛА (партнера, которого пригласил ТЕКУЩИЙ партнер) для вкладки "Партнеры" у самого партнера
+// (см. prt()/refreshRefLeads) - разовый запрос по требованию (при открытии вкладки/конкретного реферала), а
+// не постоянная живая подписка на каждого реферала, т.к. их может быть много и список меняется редко.
+let _refLeadsCache={};
 function fbDbg(t){try{const d=document.getElementById("fbDebug");if(d)d.textContent="FB: "+t}catch(e){}}
 // serverNow() - время, синхронизированное с сервером Firebase, а не с часами конкретного телефона. Код
 // приглашения ставится и проверяется на РАЗНЫХ устройствах (одно создает код, другое его вводит) - если
@@ -313,7 +401,11 @@ const FAQ_PARTNER=`<div class="c"><b>Партнерское вознагражд
 </div>`;
 let U={admin:{id:"admin",nick:"@admin",activeChat:null,pairChat:null,chatSub:"support",tab:"Чаты",viewPartner:null,lastSeen:{},pin:null,pinStage:"enter",pinBuf:"",pinFirst:null,pinResult:null,err:"",locked:false,lockStage:"nick",lockPinBuf:"",lockErr:"",lockPinResult:null,leadFilterStatus:"",leadSearchFio:""},p1:mk("p1","@alexey",true,"admin")},codes=[{c:"START-0001",o:"admin"}],leads=[],wd=[],L=[],dm=[],cur="p2",n=2,
  // "Надгробия" (tombstones) удаленных заявок - см. комментарий у scheduleSync()/fix_cross_device_delete_race_oct23.
- tombstones={leads:{}};
+ // tombstones.wd (oct25_wd_tombstones_for_live_merge_protection) - аналогичная защита теперь нужна и для
+ // выводов средств: после введения recency-слияния ВХОДЯЩИХ данных (см. _upd/mergeById выше) полный сброс
+ // adminResetAll() иначе рисковал "воскресить" на других открытых устройствах уже удаленные записи wd при
+ // следующем же слиянии - ровно та же причина, по которой у leads уже были надгробия.
+ tombstones={leads:{},wd:{}};
 U.p2=mk("p2","",false,null);U.p1.msgs.push({id:genId(),t:ONB,b:1,ts:Date.now()});
 if(REAL_USER_ID){
  // авто-вход: админ -> админ-панель; реальный партнер в Telegram -> его собственный аккаунт по стабильному tg-id (не p2!)
@@ -329,26 +421,12 @@ function sanitizeMsg(m){
  return o;
 }
 function snapshotForSync(){
- const users={};
- Object.keys(U).forEach(id=>{
-  const u=U[id];
-  // Для админа синхронизируется только код-пароль (pin) - чтобы он не "забывался" при каждой перезагрузке
-  // страницы на любом устройстве; остальные поля админа (чаты, вкладки, статус блокировки) синхронизировать
-  // не нужно - это разовый аккаунт, не партнер, и его рабочее состояние UI сугубо локально для сессии.
-  if(id==="admin"){users[id]={pin:u.pin||null};return}
-  // pinAttempts/blocked синхронизируются намеренно (в отличие от остального локального UI-состояния вроде
-  // activeChat/tab) - это защита от подбора код-пароля (см. lockPinTap/MAX_WRONG_PIN_ATTEMPTS), и блокировка
-  // должна действовать одинаково на любом устройстве партнера, а не сбрасываться при переустановке/новом
-  // устройстве/очистке локальных данных.
-  // updatedAt (в отличие от pinUpdatedAt, который защищает ТОЛЬКО pin/pinAttempts/blocked) - общая метка
-  // времени для ОСТАЛЬНЫХ синхронизируемых полей партнера (on/bal/lim/reg/codeOk/inv/nick/name/fld/regTs).
-  // См. load_simulation_oct24/oct25 - fix_cross_partner_field_clobber: при нескольких одновременно активных
-  // партнерах устройство B, еще не получившее по подписке новость об активации партнера A, при своей ОБЫЧНОЙ
-  // синхронизации (слиянии) откатывало "on" партнера A обратно на false - локальная копия B всегда побеждала
-  // для этих полей, т.к. раньше для них не было никакой защиты по времени (только у pin/blocked она была).
-  users[id]={reg:u.reg,nick:u.nick||"",name:u.name||"",fld:u.fld||"",on:u.on,codeOk:u.codeOk,inv:u.inv||null,pin:u.pin||null,bal:u.bal||0,lim:u.lim||[],msgs:(u.msgs||[]).map(sanitizeMsg),pinAttempts:u.pinAttempts||0,blocked:!!u.blocked,regTs:u.regTs||0,pinUpdatedAt:u.pinUpdatedAt||0,updatedAt:u.updatedAt||0};
- });
- return {leads,wd,L,dm,codes,users,tombstones};
+ // users больше не входит в этот снимок (см. stage1_oct25_users_profiles_split выше, у PROFILES_PATH/
+ // USERS_PATH), dm тоже больше не входит (см. stage1_oct25_dm_split, DM_PATH), и теперь L/codes тоже больше не
+ // входят (см. stage1_oct25_codes_L_split, CODES_PATH/L_PATH) - все они синхронизируются отдельно, по
+ // собственным путям (как и leads/wd). Здесь остаются только tombstones.leads - это Этап 1 полностью завершен,
+ // общий "state" больше не содержит НИЧЕГО, кроме этой служебной защиты от "воскрешения" удаленных заявок.
+ return {tombstones};
 }
 function applyRemoteSnapshot(data){
  if(!data)return;
@@ -356,47 +434,14 @@ function applyRemoteSnapshot(data){
  // противоречит друг другу, запись либо удалена, либо нет), ДО применения data.leads - это защищает и от
  // входящего обновления, которое может на мгновение содержать "воскресшую" запись (см. scheduleSync()).
  if(data.tombstones&&data.tombstones.leads)tombstones.leads=Object.assign({},tombstones.leads,data.tombstones.leads);
- leads=Array.isArray(data.leads)?data.leads:leads;
- leads=leads.filter(l=>!(l&&tombstones.leads[l.id]));
- wd=Array.isArray(data.wd)?data.wd:wd;
- L=Array.isArray(data.L)?data.L:L;
- dm=Array.isArray(data.dm)?data.dm:dm;
- codes=Array.isArray(data.codes)?data.codes:codes;
- const ru=data.users||{};
- Object.keys(ru).forEach(id=>{
-  if(id==="admin"){if(ru[id]&&ru[id].pin)U.admin.pin=ru[id].pin;return}
-  if(!U[id])U[id]=mk(id,"",false,null);
-  // ВАЖНО: раньше здесь был просто Object.assign(U[id],ru[id]) - он слепо перезаписывал ЛОКАЛЬНОЕ состояние
-  // ЦЕЛИКОМ входящими данными при КАЖДОМ живом обновлении по подписке (не только при собственной отправке
-  // этого устройства, как в scheduleSync() - здесь срабатывает на ЧУЖИЕ записи тоже). Из-за этого была
-  // следующая гонка (см. fix_cross_device_unblock_live_overwrite_oct24): админ нажимает "Разблокировать"
-  // (локально у СЕБЯ сразу сбрасывает pin/blocked), но еще не успевает отправить это в базу (его запись ждет
-  // свои 400мс debounce в scheduleSync()). В этот момент заблокированный партнер (у себя, со своей ЕЩЕ
-  // старой копией blocked=true) делает любое действие (например отправляет сообщение пригласившему через
-  // "Написать партнеру") - это запускает ЕГО собственный sync со старыми pin/blocked, которые долетают до
-  // базы и рассылаются ВСЕМ подписчикам, включая устройство админа. Устройство админа получает это чужое
-  // обновление через applyRemoteSnapshot() и слепым Object.assign() ЗАТИРАЛО СВОЕ ЖЕ только что сделанное
-  // локальное решение разблокировать партнера обратно на blocked=true/старый pin - админ видел, как кнопка
-  // "Разблокировать" тут же появлялась снова, а когда ПОЗЖЕ срабатывал его собственный (уже испорченный этой
-  // перезаписью) debounce-таймер scheduleSync(), он отправлял в базу уже испорченное состояние - партнер
-  // оставался заблокирован навсегда ("ничего не происходит" после нажатия кнопки). Исправлено: применяем ту
-  // же защиту сравнением pinUpdatedAt (момент реального изменения), что и в scheduleSync() - входящие
-  // pin/pinAttempts/blocked принимаются только если их pinUpdatedAt СТРОГО БОЛЬШЕ уже имеющегося локально,
-  // иначе более старое/чужое значение отбрасывается. У админа (id==="admin") этот механизм не нужен (см. выше).
-  const lu=U[id],incoming=ru[id]||{};
-  const ruNewer=(incoming.pinUpdatedAt||0)>(lu.pinUpdatedAt||0);
-  const keepPin=lu.pin,keepAttempts=lu.pinAttempts,keepBlocked=lu.blocked,keepUpdatedAt=lu.pinUpdatedAt;
-  // Та же защита (см. комментарий выше и updatedAt в snapshotForSync()/scheduleSync()), но для ОСТАЛЬНЫХ
-  // синхронизируемых полей (on/bal/lim/reg/codeOk/inv/nick/name/fld/regTs) - см. load_simulation_oct25:
-  // без этого ЖИВОЕ обновление от чужого, более старого устройства могло так же откатить, например, "on"
-  // (статус активации) этого же партнера на его СОБСТВЕННОМ устройстве обратно, если входящий снимок устарел.
-  const genNewer=(incoming.updatedAt||0)>=(lu.updatedAt||0);
-  const keepGen={};
-  if(!genNewer)["reg","nick","name","fld","on","codeOk","inv","bal","lim","regTs","updatedAt"].forEach(f=>{keepGen[f]=lu[f]});
-  Object.assign(U[id],incoming);
-  if(!ruNewer){U[id].pin=keepPin;U[id].pinAttempts=keepAttempts;U[id].blocked=keepBlocked;U[id].pinUpdatedAt=keepUpdatedAt}
-  if(!genNewer)Object.assign(U[id],keepGen);
- });
+ // leads/wd больше не приходят в этом снимке (см. LEADS_PATH/WD_PATH) - применяются отдельными подписками
+ // (см. ниже, в блоке if(DB){...}), с собственной защитой/фильтрацией надгробий.
+ // users больше тоже не приходят здесь (см. snapshotForSync() выше) - применяются отдельными подписками на
+ // PROFILES_PATH/USERS_PATH, каждая со своей собственной защитой по updatedAt/pinUpdatedAt (см.
+ // mergePublicProfile()/mergePrivateUser() ниже), а не общим Object.assign() как раньше.
+ // dm тоже больше не приходит здесь (см. DM_PATH) - применяется отдельной подпиской, см. ниже.
+ // L/codes тоже больше не приходят здесь (см. CODES_PATH/L_PATH, stage1_oct25_codes_L_split) - применяются
+ // отдельными подписками, см. ниже.
 }
 function genNumId(){return Date.now()*1000+Math.floor(Math.random()*1000)}
 function genId(){return Date.now().toString(36)+Math.random().toString(36).slice(2,8)}
@@ -404,8 +449,17 @@ function mergeById(remoteArr,localArr){
  // Слияние массивов с записями, у которых есть стабильный id и которые МОГУТ редактироваться после создания
  // (leads - статус/заметка/цена; wd - статус/комментарий). Ничего не теряется: если запись есть только в
  // remote (другое устройство только что её создало, а мы ещё не получили обновление) - она сохраняется;
- // если запись есть только локально (мы её только что создали) - добавляется; если есть в обоих - побеждает
- // ЛОКАЛЬНАЯ версия (это и есть то самое изменение, которое мы сейчас отправляем).
+ // если запись есть только локально (мы её только что создали) - добавляется.
+ // oct25_leads_wd_record_level_recency_fix: если ОДНА И ТА ЖЕ запись (один id) отредактирована С ОБЕИХ
+ // сторон почти одновременно (например, админ меняет статус заявки ПОЧТИ в тот же момент, когда партнер -
+ // владелец этой же заявки - создает у себя СОВСЕМ ДРУГУЮ новую заявку, и из-за этого его устройство при
+ // своей отправке заодно переотправляет и старую, у себя еще не обновленную, версию ИЗМЕНЕННОЙ админом
+ // заявки) - раньше здесь безусловно побеждала ЛОКАЛЬНАЯ версия, из-за чего случайно "протухшая" локальная
+ // копия могла откатить чужое более новое изменение того же id. Обнаружено реальной симуляцией одновременной
+ // работы админа и партнера (repro_leads_race.js). Теперь при совпадении id побеждает версия с БОЛЬШИМ
+ // значением поля _upd (отметка времени последнего локального изменения ИМЕННО ЭТОЙ записи, см. upd()/
+ // creditReward()/wdSubmit()/wdDecide()); если ни у одной из версий поля _upd нет (старые записи до этого
+ // исправления) - поведение, как и раньше, не меняется (побеждает локальная).
  // Отдельно обрабатываются СТАРЫЕ записи без поля id (созданные до этого исправления, когда id у leads
  // считался как leads.length+1, а у wd вообще не было) - они не теряются, а сверяются "по содержимому",
  // чтобы не задвоиться, если одна и та же старая запись есть и в remote, и в local без изменений.
@@ -416,17 +470,75 @@ function mergeById(remoteArr,localArr){
  const noId=[],seenNoIdKey=new Set();
  function addNoId(rec){const k=JSON.stringify(rec);if(!seenNoIdKey.has(k)){seenNoIdKey.add(k);noId.push(rec)}}
  remoteArr.forEach(r=>{if(!r)return;if(r.id!=null){if(!seenIds.has(r.id)){orderIds.push(r.id);seenIds.add(r.id)}byId.set(r.id,r)}else addNoId(r)});
- localArr.forEach(l=>{if(!l)return;if(l.id!=null){if(!seenIds.has(l.id)){orderIds.push(l.id);seenIds.add(l.id)}byId.set(l.id,l)}else addNoId(l)});
+ localArr.forEach(l=>{if(!l)return;if(l.id!=null){
+  if(!seenIds.has(l.id)){orderIds.push(l.id);seenIds.add(l.id);byId.set(l.id,l)}
+  else{
+   const existing=byId.get(l.id);
+   // existing - это запись из remoteArr (единственный источник до этого момента в проходе localArr), l - из localArr.
+   if(((existing&&existing._upd)||0)>((l&&l._upd)||0))/*remote новее по этой конкретной записи - оставляем remote*/;
+   else byId.set(l.id,l);
+  }
+ }else addNoId(l)});
  return noId.concat(orderIds.map(id=>byId.get(id)));
 }
-function mergeByContent(remoteArr,localArr){
- // Слияние "по содержимому" для записей без стабильного id (dm, L, сообщения msgs) - они всегда ТОЛЬКО
- // добавляются и никогда не редактируются после создания, поэтому достаточно не терять и не дублировать.
- remoteArr=Array.isArray(remoteArr)?remoteArr:[];
- localArr=Array.isArray(localArr)?localArr:[];
- const key=x=>JSON.stringify(x);
- const seen=new Set(remoteArr.map(key));
- return remoteArr.concat(localArr.filter(x=>!seen.has(key(x))));
+// mergeByContent() (слияние "по содержимому" без стабильного id) больше не используется - раньше применялась
+// только к L (история реферальных бонусов), а теперь L тоже имеет стабильный id и сливается через mergeById(),
+// как dm и переписка (см. stage1_oct25_codes_L_split, L_PATH/scheduleLSync() ниже). Функция удалена как мертвый код.
+// --- stage1_oct25_users_profiles_split: приватные/публичные "снимки" и слияние для разделенных путей
+// PROFILES_PATH/USERS_PATH (см. объявление этих путей выше) - по той же схеме, что и leads/wd, но не для
+// массивов записей, а для ОДНОГО объекта на владельца (сам пользователь, а не список его заявок/выводов). ---
+function privateUserSnapshot(u){
+ if(!u)return null;
+ // Как и раньше (см. старую snapshotForSync()) - у админа синхронизируется только pin, остальные поля не нужны.
+ if(u.id==="admin")return{pin:u.pin||null};
+ return{reg:u.reg,fld:u.fld||"",codeOk:u.codeOk,pin:u.pin||null,bal:u.bal||0,lim:u.lim||[],msgs:(u.msgs||[]).map(sanitizeMsg),pinAttempts:u.pinAttempts||0,blocked:!!u.blocked,regTs:u.regTs||0,pinUpdatedAt:u.pinUpdatedAt||0,updatedAt:u.updatedAt||0};
+}
+function publicProfileSnapshot(u){
+ // У админа нет публичного профиля (он не фигурирует как "партнер" в чатах/списках рефералов других партнеров).
+ if(!u||u.id==="admin")return null;
+ return{nick:u.nick||"",name:u.name||"",on:u.on,inv:u.inv||null,updatedAt:u.updatedAt||0};
+}
+function mergePrivateUser(remote,local,id){
+ // Та же логика двух групп полей по времени, что раньше была встроена в applyRemoteSnapshot()/scheduleSync()
+ // (см. их прежние комментарии про fix_cross_device_unblock_live_overwrite_oct24 и load_simulation_oct25):
+ // общая группа (reg/fld/codeOk/bal/lim/regTs) защищена updatedAt (>=, remote побеждает при равенстве -
+ // безопасно, т.к. не затрагивает pin/blocked), группа pin/pinAttempts/blocked защищена pinUpdatedAt (строго >,
+ // чтобы не "дергать" разблокировку туда-обратно при полном совпадении времени на двух устройствах).
+ if(id==="admin")return local||{pin:null}; // у админа нет multi-device гонок такого рода (см. выше)
+ remote=remote||{};local=local||{};
+ const merged=Object.assign({},remote,local,{msgs:mergeById(remote.msgs,local.msgs)});
+ // oct25_users_profiles_split_empty_remote_clobber_fix: при разделении путей "remote" впервые может быть
+ // ПОЛНОСТЬЮ пустым объектом {} (путь в базе еще никогда не записывался - раньше, в едином "state", такого
+ // не бывало: там remote либо отсутствовал целиком (data==null, обрабатывается ДО вызова этой функции), либо
+ // был уже полным снимком). Раньше здесь при равенстве updatedAt (оба 0, типичный случай для СВЕЖЕ созданного
+ // пользователя, который еще ни разу не редактировался) remote побеждал БЕЗУСЛОВНО, подставляя undefined во
+ // все поля общей группы вместо реальных локальных значений - находилось реальным тестом (sim_users_split.js)
+ // на свежесозданном демо-партнере p1 после adminResetAll(): его nick/on стирались в undefined при первой же
+ // живой подписке. Исправлено: remote побеждает ТОЛЬКО по тем полям, которые у него реально ОПРЕДЕЛЕНЫ (т.е.
+ // путь уже хотя бы раз записывался с этим полем) - пустой/неполный remote никогда не затирает локальное.
+ if((remote.updatedAt||0)>=(local.updatedAt||0)){
+  ["reg","fld","codeOk","bal","lim","regTs"].forEach(f=>{if(remote[f]!==undefined)merged[f]=remote[f]});
+  if(remote.updatedAt!==undefined)merged.updatedAt=remote.updatedAt;
+ }
+ const pinNewer=(remote.pinUpdatedAt||0)>(local.pinUpdatedAt||0);
+ const src=pinNewer?remote:local;
+ merged.pin=src.pin!==undefined?src.pin:null;
+ merged.pinAttempts=src.pinAttempts||0;
+ merged.blocked=!!src.blocked;
+ merged.pinUpdatedAt=src.pinUpdatedAt||0;
+ return merged;
+}
+function mergePublicProfile(remote,local){
+ // Один уровень защиты по времени (updatedAt, >=) - для публичных полей нет отдельной "pin-группы".
+ // См. тот же fix (oct25_users_profiles_split_empty_remote_clobber_fix) в mergePrivateUser() выше - пустой/
+ // неполный remote (путь еще никогда не записывался) не должен затирать реальные локальные значения undefined.
+ remote=remote||{};local=local||{};
+ const merged=Object.assign({},remote,local);
+ if((remote.updatedAt||0)>=(local.updatedAt||0)){
+  ["nick","name","on","inv"].forEach(f=>{if(remote[f]!==undefined)merged[f]=remote[f]});
+  if(remote.updatedAt!==undefined)merged.updatedAt=remote.updatedAt;
+ }
+ return merged;
 }
 var _forceFullOverwrite=false;
 function scheduleSync(){
@@ -484,62 +596,394 @@ function scheduleSync(){
     // в чьей локальной копии она еще "жива".
     const mergedTombLeads=Object.assign({},(remote.tombstones&&remote.tombstones.leads)||{},tombstones.leads||{});
     const merged={
-     leads:mergeById(remote.leads,local.leads).filter(l=>!(l&&mergedTombLeads[l.id])),
-     wd:mergeById(remote.wd,local.wd),
-     L:mergeByContent(remote.L,local.L),
-     dm:mergeByContent(remote.dm,local.dm),
-     // codes (одноразовые инвайт-коды) оставлены как раньше (локальная копия побеждает целиком) - у них
-     // короткий TTL и явное удаление/замена при использовании или повторной генерации, слияние "никогда не
-     // терять запись" здесь было бы опасно (мог бы "воскреснуть" уже использованный/удалённый код).
-     codes:local.codes,
-     tombstones:{leads:mergedTombLeads},
-     users:Object.assign({},remote.users||{},local.users)
+     // leads/wd больше не часть этого объединения - см. LEADS_PATH/WD_PATH и scheduleLeadsSync()/scheduleWdSync()
+     // users больше тоже не часть этого объединения - см. PROFILES_PATH/USERS_PATH, scheduleUsersSync()/
+     // scheduleProfilesSync() (stage1_oct25_users_profiles_split). dm тоже - см. DM_PATH/scheduleDmSync()
+     // (stage1_oct25_dm_split). L/codes тоже больше не часть этого объединения - см. CODES_PATH/L_PATH,
+     // scheduleCodesSync()/scheduleLSync() (stage1_oct25_codes_L_split, Этап 1 полностью завершен).
+     tombstones:{leads:mergedTombLeads}
     };
     tombstones.leads=mergedTombLeads; // подхватываем локально и то, о чем узнали только из remote
-    Object.keys(merged.users).forEach(id=>{
-     const ru=(remote.users&&remote.users[id])||{};
-     const lu=local.users[id]||{};
-     // msgs - ЕДИНСТВЕННЫЙ из "append-only по идее" списков, который на самом деле РЕДАКТИРУЕТСЯ после создания
-     // (ackAny() помечает существующее сообщение b:0,done:1 на месте, не добавляя новое) - слияние "по
-     // содержимому" (mergeByContent) в этом случае ошибочно считало отредактированное сообщение НОВЫМ (его
-     // JSON изменился) и добавляло его ВТОРЫМ экземпляром рядом со старой (еще не прочитанной) версией из
-     // remote - отсюда дублирование сообщения об активации, особенно заметное именно после нажатия
-     // "Ознакомился". Исправлено: как и для leads/wd, используется слияние по стабильному id (mergeById).
-     merged.users[id]=Object.assign({},ru,lu,{msgs:mergeById(ru.msgs,lu.msgs)});
-     // ОБЩАЯ защита по времени для остальных полей (on/bal/lim/reg/codeOk/inv/nick/name/fld/regTs) - см.
-     // updatedAt в snapshotForSync(). Без этого (как было раньше) здесь побеждала ЦЕЛИКОМ локальная версия
-     // лишь потому, что ЭТО устройство синхронизируется прямо сейчас - даже если его копия этого партнера
-     // устарела (например, устройство B еще не получило по подписке новость об активации партнера A, и его
-     // обычная синхронизация по ДРУГОЙ причине откатывала "on" партнера A обратно на false). Теперь, если
-     // remote новее локальной копии по updatedAt, remote-версия этих полей побеждает вместо локальной.
-     if(id!=="admin"&&(ru.updatedAt||0)>(lu.updatedAt||0)){
-      ["reg","nick","name","fld","on","codeOk","inv","bal","lim","regTs"].forEach(f=>{merged.users[id][f]=ru[f]});
-      merged.users[id].updatedAt=ru.updatedAt;
-     }
-     // pin/pinAttempts/blocked - раньше здесь побеждала ЦЕЛИКОМ локальная версия (как и остальные поля), но
-     // это ломало "Разблокировать" (adminUnblockPartner): если ДРУГОЕ устройство партнера успевало сделать
-     // свой обычный sync со своей еще СТАРОЙ копией (старый pin) ПОСЛЕ того как админ уже сбросил пароль, но
-     // ДО того как это устройство получило обновление - старый пароль "возвращался" обратно в базу той же
-     // логикой "локальная версия побеждает целиком". Чтобы решить эту задачу, не завязываясь на то, какое
-     // устройство синхронизируется раньше/позже, для именно ЭТИХ полей выбирается версия с БОЛЬШИМ
-     // pinUpdatedAt (момент реального изменения), а не версия с того устройства, которое просто оказалось
-     // быстрее. У админа (id==="admin") этот механизм не нужен - admin синхронизирует только один pin без
-     // multi-device гонок такого рода (см. snapshotForSync).
-     if(id!=="admin"){
-      const ruNewer=(ru.pinUpdatedAt||0)>(lu.pinUpdatedAt||0);
-      const src=ruNewer?ru:lu;
-      merged.users[id].pin=src.pin!==undefined?src.pin:null;
-      merged.users[id].pinAttempts=src.pinAttempts||0;
-      merged.users[id].blocked=!!src.blocked;
-      merged.users[id].pinUpdatedAt=src.pinUpdatedAt||0;
-     }
-    });
     return DB.ref(SYNC_PATH).set(JSON.parse(JSON.stringify(merged)));
    })
     .then(()=>fbDbg("отправлено ✓ ("+new Date().toLocaleTimeString()+")"))
     .catch(e=>fbDbg("ОШИБКА ОТПРАВКИ: "+(e&&e.code||e&&e.message||e)));
   }catch(e){fbDbg("ошибка отправки (sync): "+(e&&e.message||e))}
  },400);
+}
+// Вспомогательные функции для leads/wd, разделенных по владельцу (см. LEADS_PATH/WD_PATH выше).
+// "Дерево" (tree) - это то, что реально лежит в Firebase: у админа (видит все поддерево) это объект
+// {partnerId: [массив записей]}, у обычного партнера (видит только свой узел) - просто плоский массив.
+function flattenOwnerTree(val,isAll){
+ if(!val)return[];
+ if(isAll){let out=[];Object.keys(val).forEach(k=>{if(Array.isArray(val[k]))out=out.concat(val[k])});return out}
+ return Array.isArray(val)?val:[];
+}
+// Множество id владельцев, присутствующих в массиве записей прямо сейчас (для leads/wd - поле .o).
+function ownerIdsIn(arr){const s={};(arr||[]).forEach(x=>{if(x&&x.o)s[x.o]=true});return s}
+function scheduleLeadsSync(){
+ if(!DB)return;
+ if(!_firstLeadsSyncApplied){fbDbg("заявки: локальное изменение отложено до получения данных из базы");return}
+ if(_forceLeadsOverwrite){
+  // Намеренное удаление (см. adminClearLeadsHistory/adminDeleteSelectedLeads/adminResetAll) - немедленная
+  // прямая перезапись КАЖДОГО известного пути (включая тех, у кого сейчас уже 0 записей - это и есть смысл
+  // очистки) своим текущим (уже отфильтрованным по надгробиям) локальным состоянием, без слияния - по тем же
+  // причинам, что и для _forceFullOverwrite в scheduleSync() выше.
+  const owners=_isAdminScope?Object.keys(Object.assign({},_knownLeadOwners,ownerIdsIn(leads))):[cur];
+  _forceLeadsOverwrite=false;
+  clearTimeout(_leadsSyncTimer);
+  owners.forEach(oid=>{
+   const arr=leads.filter(l=>l.o===oid&&!(tombstones.leads&&tombstones.leads[l.id]));
+   try{
+    DB.ref(LEADS_PATH+"/"+oid).set(JSON.parse(JSON.stringify(arr)))
+     .then(()=>{_lastSyncedLeadsJSON[oid]=JSON.stringify(arr);fbDbg("заявки отправлены ✓ ("+new Date().toLocaleTimeString()+")")})
+     .catch(e=>fbDbg("ошибка отправки заявок: "+(e&&e.code||e&&e.message||e)));
+   }catch(e){fbDbg("ошибка отправки заявок: "+(e&&e.message||e))}
+  });
+  return;
+ }
+ clearTimeout(_leadsSyncTimer);
+ _leadsSyncTimer=setTimeout(()=>{
+  // stage1_oct25_split_leads_wd_dirty_tracking: owners вычисляем ЗДЕСЬ (в момент реального срабатывания
+  // таймера), а у админа - НЕ "все известные владельцы", а только те, чей локальный массив прямо сейчас
+  // реально отличается от последнего известного/отправленного отпечатка (_lastSyncedLeadsJSON) - иначе
+  // админ на каждый свой render() заново перезаписывал бы (слиянием) чужие пути, которые он вообще не
+  // трогал, и под нагрузкой это обгоняло/затирало только что созданные партнерами заявки (см. комментарий
+  // у объявления _lastSyncedLeadsJSON выше - баг найден реальной нагрузочной симуляцией).
+  const owners=_isAdminScope
+   ?Object.keys(Object.assign({},_knownLeadOwners,ownerIdsIn(leads))).filter(oid=>{
+     const localArr=leads.filter(l=>l.o===oid);
+     return JSON.stringify(localArr)!==(_lastSyncedLeadsJSON[oid]||"[]");
+    })
+   :[cur];
+  // oct25_leads_wd_transaction_fix: раньше здесь было .once("value").then(читаем remote → считаем merge →
+  // отдельным вызовом .set(merged)). Между ЭТИМ чтением и ЭТОЙ записью есть окно (сетевая задержка в реальном
+  // Firebase, в симуляции - просто незавершенные микрозадачи), в которое может влезть ЕЩЕ ОДНА параллельная
+  // попытка синхронизации того же пути (например, партнер создал подряд несколько заявок без паузы, и каждая
+  // запустила свой цикл "чтение-запись") - и чья запись landится ПОЗЖЕ, та и побеждает целиком, независимо от
+  // того, что в ней меньше актуальных данных ("потерянное обновление", lost update). Обнаружено реальной
+  // нагрузочной симуляцией 20 партнеров (sim_load_split.js) - под нагрузкой так терялось до половины заявок,
+  // хотя они ЦЕЛИКОМ оставались в локальной памяти создавшего их партнера (т.е. сам партнер не терял ничего -
+  // просто не все его заявки реально долетали до общей базы). DB.ref(path).transaction(fn) решает это именно
+  // для такого случая: fn вызывается с ГАРАНТИРОВАННО актуальным значением на момент самой записи (Firebase
+  // сам переповторяет fn, если между чтением и записью что-то изменилось), поэтому чтения и записи здесь не
+  // могут "разъехаться" в двух разных промисах.
+  owners.forEach(oid=>{
+   try{
+    DB.ref(LEADS_PATH+"/"+oid).transaction(remoteVal=>{
+     const remoteArr=remoteVal||[];
+     const localArr=leads.filter(l=>l.o===oid);
+     const merged=mergeById(remoteArr,localArr).filter(l=>!(l&&tombstones.leads&&tombstones.leads[l.id]));
+     _lastSyncedLeadsJSON[oid]=JSON.stringify(merged);
+     return JSON.parse(JSON.stringify(merged));
+    })
+     .then(()=>fbDbg("заявки отправлены ✓ ("+new Date().toLocaleTimeString()+")"))
+     .catch(e=>fbDbg("ошибка отправки заявок: "+(e&&e.code||e&&e.message||e)));
+   }catch(e){fbDbg("ошибка отправки заявок: "+(e&&e.message||e))}
+  });
+ },400);
+}
+function scheduleWdSync(){
+ if(!DB)return;
+ if(!_firstWdSyncApplied){fbDbg("выводы: локальное изменение отложено до получения данных из базы");return}
+ if(_forceWdOverwrite){
+  // Единственный случай полного принудительного сброса wd сейчас - adminResetAll() (теперь с надгробиями
+  // tombstones.wd - см. объявление tombstones выше - по тому же принципу, что и у leads).
+  const owners=_isAdminScope?Object.keys(Object.assign({},_knownWdOwners,ownerIdsIn(wd))):[cur];
+  _forceWdOverwrite=false;
+  clearTimeout(_wdSyncTimer);
+  owners.forEach(oid=>{
+   const arr=wd.filter(x=>x.o===oid&&!(tombstones.wd&&tombstones.wd[x.id]));
+   try{
+    DB.ref(WD_PATH+"/"+oid).set(JSON.parse(JSON.stringify(arr)))
+     .then(()=>{_lastSyncedWdJSON[oid]=JSON.stringify(arr);fbDbg("выводы отправлены ✓ ("+new Date().toLocaleTimeString()+")")})
+     .catch(e=>fbDbg("ошибка отправки выводов: "+(e&&e.code||e&&e.message||e)));
+   }catch(e){fbDbg("ошибка отправки выводов: "+(e&&e.message||e))}
+  });
+  return;
+ }
+ clearTimeout(_wdSyncTimer);
+ _wdSyncTimer=setTimeout(()=>{
+  // stage1_oct25_split_leads_wd_dirty_tracking - см. тот же принцип выше, в scheduleLeadsSync().
+  const owners=_isAdminScope
+   ?Object.keys(Object.assign({},_knownWdOwners,ownerIdsIn(wd))).filter(oid=>{
+     const localArr=wd.filter(x=>x.o===oid);
+     return JSON.stringify(localArr)!==(_lastSyncedWdJSON[oid]||"[]");
+    })
+   :[cur];
+  // oct25_leads_wd_transaction_fix - см. тот же принцип выше, в scheduleLeadsSync().
+  owners.forEach(oid=>{
+   try{
+    DB.ref(WD_PATH+"/"+oid).transaction(remoteVal=>{
+     const remoteArr=remoteVal||[];
+     const localArr=wd.filter(x=>x.o===oid);
+     const merged=mergeById(remoteArr,localArr).filter(x=>!(x&&tombstones.wd&&tombstones.wd[x.id]));
+     _lastSyncedWdJSON[oid]=JSON.stringify(merged);
+     return JSON.parse(JSON.stringify(merged));
+    })
+     .then(()=>fbDbg("выводы отправлены ✓ ("+new Date().toLocaleTimeString()+")"))
+     .catch(e=>fbDbg("ошибка отправки выводов: "+(e&&e.code||e&&e.message||e)));
+   }catch(e){fbDbg("ошибка отправки выводов: "+(e&&e.message||e))}
+  });
+ },400);
+}
+// --- stage1_oct25_users_profiles_split: синхронизация разделенных путей PROFILES_PATH/USERS_PATH - по той же
+// схеме (force-overwrite для намеренного сброса, debounced merge через transaction() для обычных изменений,
+// dirty-tracking у админа через _lastSyncedUsersJSON/_lastSyncedProfilesJSON), что и scheduleLeadsSync()/
+// scheduleWdSync() выше, но для ОДНОГО объекта на владельца (не массива записей). ---
+function scheduleUsersSync(){
+ if(!DB)return;
+ if(!_firstUsersSyncApplied){fbDbg("пользователи: локальное изменение отложено до получения данных из базы");return}
+ if(_forceUsersOverwrite){
+  // Единственный случай принудительного сброса - adminResetAll() (удаленные партнеры должны реально исчезнуть
+  // из USERS_PATH, а не просто перестать перезаписываться - поэтому пишем null для тех id из _knownUserOwners,
+  // которых больше нет в U).
+  const owners=_isAdminScope?Object.keys(Object.assign({},_knownUserOwners,U)):[cur];
+  _forceUsersOverwrite=false;
+  clearTimeout(_usersSyncTimer);
+  owners.forEach(oid=>{
+   const val=privateUserSnapshot(U[oid]);
+   try{
+    DB.ref(USERS_PATH+"/"+oid).set(val===null?null:JSON.parse(JSON.stringify(val)))
+     .then(()=>{_lastSyncedUsersJSON[oid]=JSON.stringify(val);fbDbg("пользователи отправлены ✓ ("+new Date().toLocaleTimeString()+")")})
+     .catch(e=>fbDbg("ошибка отправки пользователей: "+(e&&e.code||e&&e.message||e)));
+   }catch(e){fbDbg("ошибка отправки пользователей: "+(e&&e.message||e))}
+  });
+  return;
+ }
+ clearTimeout(_usersSyncTimer);
+ _usersSyncTimer=setTimeout(()=>{
+  const owners=_isAdminScope
+   ?Object.keys(Object.assign({},_knownUserOwners,U)).filter(oid=>{
+     const localJSON=JSON.stringify(privateUserSnapshot(U[oid]));
+     return localJSON!==(_lastSyncedUsersJSON[oid]||"null");
+    })
+   :[cur];
+  owners.forEach(oid=>{
+   if(!U[oid])return; // удален локально НЕ через adminResetAll (не должно случаться в обычном потоке) - пропускаем
+   try{
+    DB.ref(USERS_PATH+"/"+oid).transaction(remoteVal=>{
+     const merged=mergePrivateUser(remoteVal,privateUserSnapshot(U[oid]),oid);
+     _lastSyncedUsersJSON[oid]=JSON.stringify(merged);
+     return JSON.parse(JSON.stringify(merged));
+    })
+     .then(()=>fbDbg("пользователи отправлены ✓ ("+new Date().toLocaleTimeString()+")"))
+     .catch(e=>fbDbg("ошибка отправки пользователей: "+(e&&e.code||e&&e.message||e)));
+   }catch(e){fbDbg("ошибка отправки пользователей: "+(e&&e.message||e))}
+  });
+ },400);
+}
+function scheduleProfilesSync(){
+ if(!DB)return;
+ if(!_firstProfilesSyncApplied){fbDbg("профили: локальное изменение отложено до получения данных из базы");return}
+ if(_forceProfilesOverwrite){
+  const owners=(_isAdminScope?Object.keys(Object.assign({},_knownProfileOwners,U)):[cur]).filter(oid=>oid!=="admin");
+  _forceProfilesOverwrite=false;
+  clearTimeout(_profilesSyncTimer);
+  owners.forEach(oid=>{
+   const val=publicProfileSnapshot(U[oid]);
+   try{
+    DB.ref(PROFILES_PATH+"/"+oid).set(val===null?null:JSON.parse(JSON.stringify(val)))
+     .then(()=>{_lastSyncedProfilesJSON[oid]=JSON.stringify(val);fbDbg("профили отправлены ✓ ("+new Date().toLocaleTimeString()+")")})
+     .catch(e=>fbDbg("ошибка отправки профилей: "+(e&&e.code||e&&e.message||e)));
+   }catch(e){fbDbg("ошибка отправки профилей: "+(e&&e.message||e))}
+  });
+  return;
+ }
+ clearTimeout(_profilesSyncTimer);
+ _profilesSyncTimer=setTimeout(()=>{
+  const owners=(_isAdminScope
+   ?Object.keys(Object.assign({},_knownProfileOwners,U)).filter(oid=>{
+     const localJSON=JSON.stringify(publicProfileSnapshot(U[oid]));
+     return localJSON!==(_lastSyncedProfilesJSON[oid]||"null");
+    })
+   :[cur]).filter(oid=>oid!=="admin");
+  owners.forEach(oid=>{
+   if(!U[oid])return;
+   try{
+    DB.ref(PROFILES_PATH+"/"+oid).transaction(remoteVal=>{
+     const merged=mergePublicProfile(remoteVal,publicProfileSnapshot(U[oid]));
+     _lastSyncedProfilesJSON[oid]=JSON.stringify(merged);
+     return JSON.parse(JSON.stringify(merged));
+    })
+     .then(()=>fbDbg("профили отправлены ✓ ("+new Date().toLocaleTimeString()+")"))
+     .catch(e=>fbDbg("ошибка отправки профилей: "+(e&&e.code||e&&e.message||e)));
+   }catch(e){fbDbg("ошибка отправки профилей: "+(e&&e.message||e))}
+  });
+ },400);
+}
+// --- stage1_oct25_dm_split: синхронизация переписки через DM_PATH (см. его объявление выше). В отличие от
+// leads/wd/users, у сообщения ДВА участника - поэтому "владельцы", которым нужно отправить КОПИЮ сообщения,
+// вычисляются не по одному полю .o, а по паре (a,b): для обычного партнера - он сам (cur, его собственный
+// узел dm/{cur} получает ВСЕ его сообщения, и с поддержкой/админом, и с рефералами) и, дополнительно, каждый
+// НЕ-админ собеседник, с которым у него есть переписка (т.к. такому собеседнику нужна СВОЯ копия сообщения в
+// ЕГО собственном узле dm/{тот_партнер} - см. комментарий у DM_PATH). Сообщения с админом НЕ дублируются в
+// отдельный узел - админ и так подписан на корень целиком.
+function dmOtherPartnerIdsFor(selfId){
+ const s={};
+ (dm||[]).forEach(x=>{
+  if(!x)return;
+  const other=x.a===selfId?x.b:(x.b===selfId?x.a:null);
+  if(other&&other!=="admin"&&other!==selfId)s[other]=true;
+ });
+ return s;
+}
+function dmAllNonAdminIdsIn(arr){
+ const s={};
+ (arr||[]).forEach(x=>{if(!x)return;if(x.a&&x.a!=="admin")s[x.a]=true;if(x.b&&x.b!=="admin")s[x.b]=true});
+ return s;
+}
+function scheduleDmSync(){
+ if(!DB)return;
+ if(!_firstDmSyncApplied){fbDbg("переписка: локальное изменение отложено до получения данных из базы");return}
+ if(_forceDmOverwrite){
+  // Единственный случай принудительного сброса - adminResetAll() (dm=[] уже установлен к этому моменту) -
+  // стираем КАЖДЫЙ известный узел (включая те, у кого сейчас уже 0 сообщений - в этом и смысл очистки).
+  const owners=_isAdminScope?Object.keys(Object.assign({},_knownDmOwners,dmAllNonAdminIdsIn(dm))):[cur];
+  _forceDmOverwrite=false;
+  clearTimeout(_dmSyncTimer);
+  owners.forEach(oid=>{
+   const arr=dm.filter(x=>x.a===oid||x.b===oid);
+   try{
+    DB.ref(DM_PATH+"/"+oid).set(JSON.parse(JSON.stringify(arr)))
+     .then(()=>{_lastSyncedDmJSON[oid]=JSON.stringify(arr);fbDbg("переписка отправлена ✓ ("+new Date().toLocaleTimeString()+")")})
+     .catch(e=>fbDbg("ошибка отправки переписки: "+(e&&e.code||e&&e.message||e)));
+   }catch(e){fbDbg("ошибка отправки переписки: "+(e&&e.message||e))}
+  });
+  return;
+ }
+ clearTimeout(_dmSyncTimer);
+ _dmSyncTimer=setTimeout(()=>{
+  const owners=_isAdminScope
+   ?Object.keys(Object.assign({},_knownDmOwners,dmAllNonAdminIdsIn(dm))).filter(oid=>{
+     const localArr=dm.filter(x=>x.a===oid||x.b===oid);
+     return JSON.stringify(localArr)!==(_lastSyncedDmJSON[oid]||"[]");
+    })
+   :Object.keys(Object.assign({[cur]:true},dmOtherPartnerIdsFor(cur)));
+  // Транзакция (как и для leads/wd/users) - читает АКТУАЛЬНОЕ значение узла в момент записи и сливает его с
+  // тем, что видно ТЕКУЩЕМУ устройству (по id сообщения, см. mergeById()) - никогда не теряет и не дублирует
+  // сообщения, в т.ч. когда СВОЯ копия сообщения в чужом узле (см. комментарий у DM_PATH) пишется ПАРАЛЛЕЛЬНО
+  // с тем, как сам владелец того узла пишет туда что-то ещё.
+  owners.forEach(oid=>{
+   try{
+    DB.ref(DM_PATH+"/"+oid).transaction(remoteVal=>{
+     const remoteArr=remoteVal||[];
+     const localArr=dm.filter(x=>x.a===oid||x.b===oid);
+     const merged=mergeById(remoteArr,localArr);
+     _lastSyncedDmJSON[oid]=JSON.stringify(merged);
+     return JSON.parse(JSON.stringify(merged));
+    })
+     .then(()=>fbDbg("переписка отправлена ✓ ("+new Date().toLocaleTimeString()+")"))
+     .catch(e=>fbDbg("ошибка отправки переписки: "+(e&&e.code||e&&e.message||e)));
+   }catch(e){fbDbg("ошибка отправки переписки: "+(e&&e.message||e))}
+  });
+ },400);
+}
+// --- stage1_oct25_codes_L_split: синхронизация инвайт-кодов через CODES_PATH (см. его объявление выше). В
+// отличие от leads/wd/users, пишем ВСЕГДА только в СВОЙ собственный узел - "местная копия побеждает целиком"
+// для своего кода (как и раньше), поэтому тут нужен обычный .set(), а не transaction()-слияние: слияние здесь
+// было бы ОПАСНО (могло бы "воскресить" уже использованный/удаленный код), именно как и в старом комментарии у
+// codes:local.codes в scheduleSync(). Чужие коды в этот узел никогда не попадают.
+function scheduleCodesSync(){
+ if(!DB)return;
+ if(!_firstCodesSyncApplied){fbDbg("коды: локальное изменение отложено до получения данных из базы");return}
+ if(_forceCodesOverwrite){
+  // Единственный случай принудительного сброса - adminResetAll() (codes уже сброшен к этому моменту до
+  // [{c:"START-0001",o:"admin"}]) - стираем КАЖДЫЙ известный узел (включая те, у кого сейчас уже 0 кодов).
+  const owners=_isAdminScope?Object.keys(Object.assign({},_knownCodeOwners,ownerIdsIn(codes))):[cur];
+  _forceCodesOverwrite=false;
+  clearTimeout(_codesSyncTimer);
+  owners.forEach(oid=>{
+   const arr=codes.filter(c=>c.o===oid);
+   try{
+    DB.ref(CODES_PATH+"/"+oid).set(JSON.parse(JSON.stringify(arr)))
+     .then(()=>{_lastSyncedCodesJSON[oid]=JSON.stringify(arr);fbDbg("коды отправлены ✓ ("+new Date().toLocaleTimeString()+")")})
+     .catch(e=>fbDbg("ошибка отправки кодов: "+(e&&e.code||e&&e.message||e)));
+   }catch(e){fbDbg("ошибка отправки кодов: "+(e&&e.message||e))}
+  });
+  return;
+ }
+ clearTimeout(_codesSyncTimer);
+ _codesSyncTimer=setTimeout(()=>{
+  const arr=codes.filter(c=>c.o===cur);
+  const key=JSON.stringify(arr);
+  if(key===(_lastSyncedCodesJSON[cur]||"[]"))return; // свой узел не менялся - не дергаем базу зря
+  try{
+   DB.ref(CODES_PATH+"/"+cur).set(JSON.parse(JSON.stringify(arr)))
+    .then(()=>{_lastSyncedCodesJSON[cur]=key;fbDbg("коды отправлены ✓ ("+new Date().toLocaleTimeString()+")")})
+    .catch(e=>fbDbg("ошибка отправки кодов: "+(e&&e.code||e&&e.message||e)));
+  }catch(e){fbDbg("ошибка отправки кодов: "+(e&&e.message||e))}
+ },400);
+}
+// Безопасное УДАЛЕНИЕ кода из ЧУЖОГО узла (см. комментарий у CODES_PATH выше) - используется в act() и при
+// партнер использует/код устарел. transaction() гарантирует, что мы не затрем ничего, кроме РОВНО этого значения
+// кода - если владелец уже сгенерировал новый код в промежутке (другое значение), он не будет затронут.
+function removeCodeFromOwnerPath(ownerId,codeValue){
+ if(!DB)return;
+ try{
+  DB.ref(CODES_PATH+"/"+ownerId).transaction(remoteVal=>{
+   const remoteArr=Array.isArray(remoteVal)?remoteVal:[];
+   return remoteArr.filter(c=>c.c!==codeValue);
+  }).catch(e=>fbDbg("ошибка удаления кода: "+(e&&e.code||e&&e.message||e)));
+ }catch(e){fbDbg("ошибка удаления кода (catch): "+(e&&e.message||e))}
+}
+// Множество id "получателей" (.to) бонусов, присутствующих в массиве L прямо сейчас - аналог ownerIdsIn(), но
+// для L (где владелец - получатель бонуса, а не создатель записи, см. комментарий у L_PATH выше).
+function toIdsIn(arr){const s={};(arr||[]).forEach(x=>{if(x&&x.to)s[x.to]=true});return s}
+// --- stage1_oct25_codes_L_split: синхронизация истории реферальных бонусов через L_PATH (см. его объявление
+// выше). Запись ВСЕГДА кросс-владельческая (см. creditReward() - пишущее устройство это l.o, а владелец записи
+// по .to это u.inv, ДРУГОЙ партнер) - ровно как переписка между партнерами в DM_PATH, поэтому используется тот
+// же механизм: transaction()+mergeById() по стабильному id, никогда не теряющий и не дублирующий записи.
+function scheduleLSync(){
+ if(!DB)return;
+ if(!_firstLSyncApplied){fbDbg("бонусы: локальное изменение отложено до получения данных из базы");return}
+ if(_forceLOverwrite){
+  const owners=_isAdminScope?Object.keys(Object.assign({},_knownLOwners,toIdsIn(L))):[cur];
+  _forceLOverwrite=false;
+  clearTimeout(_lSyncTimer);
+  owners.forEach(oid=>{
+   const arr=L.filter(x=>x.to===oid);
+   try{
+    DB.ref(L_PATH+"/"+oid).set(JSON.parse(JSON.stringify(arr)))
+     .then(()=>{_lastSyncedLJSON[oid]=JSON.stringify(arr);fbDbg("бонусы отправлены ✓ ("+new Date().toLocaleTimeString()+")")})
+     .catch(e=>fbDbg("ошибка отправки бонусов: "+(e&&e.code||e&&e.message||e)));
+   }catch(e){fbDbg("ошибка отправки бонусов: "+(e&&e.message||e))}
+  });
+  return;
+ }
+ clearTimeout(_lSyncTimer);
+ _lSyncTimer=setTimeout(()=>{
+  const owners=_isAdminScope
+   ?Object.keys(Object.assign({},_knownLOwners,toIdsIn(L))).filter(oid=>{
+     const localArr=L.filter(x=>x.to===oid);
+     return JSON.stringify(localArr)!==(_lastSyncedLJSON[oid]||"[]");
+    })
+   // У обычного партнера новая запись в L почти всегда для ЧУЖОГО .to (см. creditReward() - начисление
+   // бонуса ПРИГЛАСИВШЕМУ), а не для cur - поэтому, как и dmOtherPartnerIdsFor() для переписки, берем cur
+   // плюс все .to, фактически присутствующие прямо сейчас в локальном L.
+   :Object.keys(Object.assign({[cur]:true},toIdsIn(L)));
+  owners.forEach(oid=>{
+   try{
+    DB.ref(L_PATH+"/"+oid).transaction(remoteVal=>{
+     const remoteArr=remoteVal||[];
+     const localArr=L.filter(x=>x.to===oid);
+     const merged=mergeById(remoteArr,localArr);
+     _lastSyncedLJSON[oid]=JSON.stringify(merged);
+     return JSON.parse(JSON.stringify(merged));
+    })
+     .then(()=>fbDbg("бонусы отправлены ✓ ("+new Date().toLocaleTimeString()+")"))
+     .catch(e=>fbDbg("ошибка отправки бонусов: "+(e&&e.code||e&&e.message||e)));
+   }catch(e){fbDbg("ошибка отправки бонусов: "+(e&&e.message||e))}
+  });
+ },400);
+}
+// Разовый (не живой) запрос заявок РЕФЕРАЛОВ текущего партнера - см. _refLeadsCache выше и prt() ниже.
+function refreshRefLeads(uid){
+ if(!DB)return;
+ const ps=Object.values(U).filter(x=>x.inv==uid&&x.id!=="admin");
+ if(!ps.length)return;
+ Promise.all(ps.map(p=>DB.ref(LEADS_PATH+"/"+p.id).once("value").then(snap=>{_refLeadsCache[p.id]=snap.val()||[]}).catch(()=>{})))
+  .then(()=>render());
 }
 if(DB){
  // До прихода первого реального снимка данных из базы локальный объект U содержит только "заготовку по
@@ -566,20 +1010,221 @@ if(DB){
    _applyingRemote=true;
    try{
     applyRemoteSnapshot(snap.val());
-    // --- Автоблокировка при входе: начиная со следующего запуска приложения после регистрации/активации, партнер должен ввести ник+пароль при каждом новом входе. Срабатывает один раз за сессию, в момент первого получения данных из базы — а не при каждом последующем обновлении (иначе экран блокировки появлялся бы при любом чужом изменении данных). ---
+    // --- Автоблокировка при входе (см. applyLockGateOnce() выше): начиная со следующего запуска приложения
+    // после регистрации/активации, партнер должен ввести ник+пароль при каждом новом входе. Сама проверка
+    // ТЕПЕРЬ выполняется не здесь (раньше pin/on лежали в этом же "state"), а в подписке на USERS_PATH (для
+    // админа, т.к. его pin переехал туда) или PROFILES_PATH (для партнера, т.к. его on переехал туда) - см.
+    // ниже, applyLockGateOnce(). Здесь только снимаем "заглушку" экрана загрузки, как и раньше.
     if(!_firstSyncApplied){
      _firstSyncApplied=true;
      _showLoadingGate=false;
-     const u0=U[cur];
-     // Готов к блокировке: у партнера - после активации (on=true), у админа - после того как он хоть раз задал код-пароль (pin).
-     const ready0=u0&&(u0.id==="admin"?!!u0.pin:u0.on);
-     if(ready0){u0.locked=true;u0.lockStage="nick";u0.lockPinBuf="";u0.lockErr=""}
     }
     render();
    }catch(e){}
    _applyingRemote=false;
   },err=>{fbDbg("ОШИБКА ПОДПИСКИ: "+(err&&err.code||err&&err.message||err));_showLoadingGate=false;render()});
  }catch(e){fbDbg("ошибка подписки (catch): "+(e&&e.message||e));_showLoadingGate=false}
+ // --- Подписка на leads/wd, разделенные по владельцу (см. LEADS_PATH/WD_PATH выше) ---
+ // _isAdminScope вычисляется ЗДЕСЬ (а не раньше), т.к. к этому моменту cur уже окончательно определен через
+ // REAL_USER_ID (обычная заготовка ("p2") используется только в демо-режиме вне Telegram). Админ подписывается
+ // на ВСЕ поддерево (видит всех партнеров, как и раньше), обычный партнер - только на свой собственный узел
+ // (данные остальных партнеров теперь физически не попадают на его устройство, см. комментарий у LEADS_PATH).
+ // ПРИМЕЧАНИЕ: если переключить аккаунт через демо-панель (видна только вне Telegram, см. #who) - подписка
+ // останется на ПЕРВОНАЧАЛЬНОГО пользователя сессии; это не влияет на реальных партнеров (REAL_USER_ID не
+ // меняется в рамках одного открытия приложения в Telegram) и затрагивает только ручное тестирование вне Telegram.
+ _isAdminScope=(cur==="admin");
+ const leadsRefPath=_isAdminScope?LEADS_PATH:(LEADS_PATH+"/"+cur);
+ const wdRefPath=_isAdminScope?WD_PATH:(WD_PATH+"/"+cur);
+ try{
+  DB.ref(leadsRefPath).on("value",snap=>{
+   _applyingRemote=true;
+   try{
+    const val=snap.val();
+    if(_isAdminScope)Object.keys(val||{}).forEach(id=>{_knownLeadOwners[id]=true});
+    else if(cur)_knownLeadOwners[cur]=true;
+    // oct25_leads_wd_live_listener_merge_fix: раньше здесь было БЕЗУСЛОВНОЕ leads=flattenOwnerTree(val,...) -
+    // то есть ЛЮБОЕ входящее обновление (даже вообще не касающееся этого владельца - у админа общий путь на
+    // ВСЕХ партнеров сразу) целиком заменяло локальный массив leads. Из-за этого собственное, еще НЕ
+    // отправленное изменение (например, админ только что поменял статус заявки через upd(), но еще не прошли
+    // отправляющиеся 400мс) немедленно затиралось, если в этот момент приходило ЧУЖОЕ, не связанное с этим
+    // изменением обновление (например, любой другой партнер создал у себя новую заявку) - обнаружено реальной
+    // симуляцией одновременной работы (repro_leads_race.js). Теперь входящие данные СЛИВАЮТСЯ с тем, что уже
+    // есть локально (через mergeById с защитой по _upd - см. выше), а не заменяют его целиком; "надгробия"
+    // (tombstones.leads) по-прежнему гарантируют, что реально удаленные заявки не "воскреснут" из-за этого слияния.
+    const incomingLeads=flattenOwnerTree(val,_isAdminScope).filter(l=>!(l&&tombstones.leads&&tombstones.leads[l.id]));
+    leads=mergeById(incomingLeads,leads).filter(l=>!(l&&tombstones.leads&&tombstones.leads[l.id]));
+    // Обновляем "отпечаток" последнего известного состояния КАЖДОГО владельца по ВХОДЯЩИМ (а не слитым) данным -
+    // это и есть то, что делает scheduleLeadsSync() "не трогать чужое": пока локальный массив владельца
+    // совпадает именно с тем, что реально пришло с сервера, админ не станет его переотправлять.
+    if(_isAdminScope)Object.keys(val||{}).forEach(id=>{_lastSyncedLeadsJSON[id]=JSON.stringify((val[id]||[]).filter(l=>!(l&&tombstones.leads&&tombstones.leads[l.id])))});
+    else if(cur)_lastSyncedLeadsJSON[cur]=JSON.stringify(incomingLeads);
+    _firstLeadsSyncApplied=true;
+    render();
+   }catch(e){}
+   _applyingRemote=false;
+  },err=>{fbDbg("ОШИБКА ПОДПИСКИ (заявки): "+(err&&err.code||err&&err.message||err))});
+ }catch(e){fbDbg("ошибка подписки на заявки (catch): "+(e&&e.message||e))}
+ try{
+  DB.ref(wdRefPath).on("value",snap=>{
+   _applyingRemote=true;
+   try{
+    const val=snap.val();
+    if(_isAdminScope)Object.keys(val||{}).forEach(id=>{_knownWdOwners[id]=true});
+    else if(cur)_knownWdOwners[cur]=true;
+    // oct25_leads_wd_live_listener_merge_fix - тот же принцип, что и для leads выше: сливаем, а не заменяем
+    // целиком, с защитой от воскрешения удаленных записей через tombstones.wd (см. объявление tombstones выше).
+    const incomingWd=flattenOwnerTree(val,_isAdminScope).filter(x=>!(x&&tombstones.wd&&tombstones.wd[x.id]));
+    wd=mergeById(incomingWd,wd).filter(x=>!(x&&tombstones.wd&&tombstones.wd[x.id]));
+    if(_isAdminScope)Object.keys(val||{}).forEach(id=>{_lastSyncedWdJSON[id]=JSON.stringify((val[id]||[]).filter(x=>!(x&&tombstones.wd&&tombstones.wd[x.id])))});
+    else if(cur)_lastSyncedWdJSON[cur]=JSON.stringify(incomingWd);
+    _firstWdSyncApplied=true;
+    render();
+   }catch(e){}
+   _applyingRemote=false;
+  },err=>{fbDbg("ОШИБКА ПОДПИСКИ (выводы): "+(err&&err.code||err&&err.message||err))});
+ }catch(e){fbDbg("ошибка подписки на выводы (catch): "+(e&&e.message||e))}
+ // --- Подписка на PROFILES_PATH/USERS_PATH (см. их объявление выше, stage1_oct25_users_profiles_split) ---
+ // PROFILES_PATH - ВСЕГДА корень целиком, независимо от роли (и админ, и любой партнер) - это намеренно
+ // открытый "публичный" путь (визитка: ник/имя/статус активации/кто пригласил), нужный другим партнерам для
+ // чата/списка рефералов (см. contactsOf()/prt()). USERS_PATH - как и для leads/wd: админ подписывается на
+ // ВЕСЬ корень, обычный партнер - только на свой собственный узел (приватные данные других партнеров, включая
+ // PIN-код и баланс, теперь физически не попадают на устройство партнера, не являющегося их владельцем).
+ const usersRefPath=_isAdminScope?USERS_PATH:(USERS_PATH+"/"+cur);
+ try{
+  DB.ref(PROFILES_PATH).on("value",snap=>{
+   _applyingRemote=true;
+   try{
+    const val=snap.val()||{};
+    Object.keys(val).forEach(id=>{
+     _knownProfileOwners[id]=true;
+     if(id==="admin")return; // у админа нет публичного профиля (см. publicProfileSnapshot())
+     if(!U[id])U[id]=mk(id,"",false,null);
+     // Слияние ТОЛЬКО по полям публичного профиля (nick/name/on/inv/updatedAt) - остальное локальное состояние
+     // этого пользователя (вкладки/формы/черновики чата и т.д.) этой подпиской не затрагивается вообще.
+     Object.assign(U[id],mergePublicProfile(val[id],publicProfileSnapshot(U[id])));
+     _lastSyncedProfilesJSON[id]=JSON.stringify(val[id]);
+    });
+    _firstProfilesSyncApplied=true;
+    if(cur!=="admin")applyLockGateOnce(); // у партнера "готовность" к автоблокировке зависит от поля on (здесь)
+    render();
+   }catch(e){}
+   _applyingRemote=false;
+  },err=>{fbDbg("ОШИБКА ПОДПИСКИ (профили): "+(err&&err.code||err&&err.message||err))});
+ }catch(e){fbDbg("ошибка подписки на профили (catch): "+(e&&e.message||e))}
+ try{
+  DB.ref(usersRefPath).on("value",snap=>{
+   _applyingRemote=true;
+   try{
+    const val=snap.val()||{};
+    if(_isAdminScope){
+     Object.keys(val).forEach(id=>{
+      _knownUserOwners[id]=true;
+      if(id==="admin"){if(val.admin&&val.admin.pin)U.admin.pin=val.admin.pin;_lastSyncedUsersJSON.admin=JSON.stringify(val.admin);return}
+      if(!U[id])U[id]=mk(id,"",false,null);
+      Object.assign(U[id],mergePrivateUser(val[id],privateUserSnapshot(U[id]),id));
+      _lastSyncedUsersJSON[id]=JSON.stringify(val[id]);
+     });
+    }else if(cur){
+     _knownUserOwners[cur]=true;
+     if(cur==="admin"){if(val&&val.pin)U.admin.pin=val.pin;_lastSyncedUsersJSON.admin=JSON.stringify(val)}
+     else{
+      Object.assign(U[cur],mergePrivateUser(val,privateUserSnapshot(U[cur]),cur));
+      _lastSyncedUsersJSON[cur]=JSON.stringify(val);
+     }
+    }
+    _firstUsersSyncApplied=true;
+    if(cur==="admin")applyLockGateOnce(); // у админа "готовность" к автоблокировке зависит от pin (здесь)
+    render();
+   }catch(e){}
+   _applyingRemote=false;
+  },err=>{fbDbg("ОШИБКА ПОДПИСКИ (пользователи): "+(err&&err.code||err&&err.message||err))});
+ }catch(e){fbDbg("ошибка подписки на пользователей (catch): "+(e&&e.message||e))}
+ // --- Подписка на DM_PATH (переписка, см. его объявление выше, stage1_oct25_dm_split) - админ подписывается
+ // на ВЕСЬ корень (видит все переписки, как и раньше), обычный партнер - только на свой собственный узел
+ // (dm/{его id}), который по конструкции содержит ВСЕ его переписки (и с поддержкой, и с рефералами) целиком.
+ const dmRefPath=_isAdminScope?DM_PATH:(DM_PATH+"/"+cur);
+ try{
+  DB.ref(dmRefPath).on("value",snap=>{
+   _applyingRemote=true;
+   try{
+    const val=snap.val();
+    let incomingDm;
+    if(_isAdminScope){
+     Object.keys(val||{}).forEach(id=>{_knownDmOwners[id]=true});
+     // flattenOwnerTree(val,true) у админа может содержать ДВЕ копии одного и того же партнер-партнерского
+     // сообщения (по дизайну - см. комментарий у DM_PATH, оно пишется и в dm/{A}, и в dm/{B}) - mergeById(...,[])
+     // схлопывает дубликаты по стабильному id (второй аргумент - пустой локальный массив, т.к. здесь нужно
+     // только убрать дубли внутри REMOTE данных, а не слить их с локальным состоянием - это происходит ниже).
+     incomingDm=mergeById(flattenOwnerTree(val,true),[]);
+     Object.keys(val||{}).forEach(id=>{_lastSyncedDmJSON[id]=JSON.stringify((val[id]||[]))});
+    }else{
+     incomingDm=Array.isArray(val)?val:[];
+     if(cur){_knownDmOwners[cur]=true;_lastSyncedDmJSON[cur]=JSON.stringify(incomingDm)}
+    }
+    // Сливаем (а не заменяем целиком) с тем, что уже есть локально - по тому же принципу, что и для leads/wd
+    // (см. oct25_leads_wd_live_listener_merge_fix) - иначе собственное, еще не отправленное изменение (только
+    // что отправленное сообщение) могло бы затираться чужим, не связанным с ним входящим обновлением.
+    dm=mergeById(incomingDm,dm);
+    _firstDmSyncApplied=true;
+    render();
+   }catch(e){}
+   _applyingRemote=false;
+  },err=>{fbDbg("ОШИБКА ПОДПИСКИ (переписка): "+(err&&err.code||err&&err.message||err))});
+ }catch(e){fbDbg("ошибка подписки на переписку (catch): "+(e&&e.message||e))}
+ // --- Подписка на CODES_PATH (инвайт-коды, см. его объявление выше, stage1_oct25_codes_L_split) - ВСЕГДА
+ // весь корень, независимо от роли (и админ, и любой партнер) - см. комментарий у CODES_PATH: партнер,
+ // вводящий чужой код, должен суметь найти его ПО ЗНАЧЕНИЮ среди всех кодов, не зная владельца заранее.
+ try{
+  DB.ref(CODES_PATH).on("value",snap=>{
+   _applyingRemote=true;
+   try{
+    const val=snap.val()||{};
+    Object.keys(val).forEach(id=>{_knownCodeOwners[id]=true});
+    let incomingCodes=flattenOwnerTree(val,true);
+    // Защита от затирания СВОЕГО еще не отправленного изменения (как и для leads/wd/users/dm) - если наш
+    // собственный узел сейчас "грязный" (есть локальное изменение, которое debounce ещё не отправил), берем
+    // СВОЙ локальный срез вместо входящего remote для cur - "местная копия побеждает целиком" для своего кода,
+    // как и раньше.
+    const myLocal=codes.filter(c=>c.o===cur);
+    if(cur&&JSON.stringify(myLocal)!==(_lastSyncedCodesJSON[cur]||"[]")){
+     incomingCodes=incomingCodes.filter(c=>c.o!==cur).concat(myLocal);
+    }else if(cur){
+     _lastSyncedCodesJSON[cur]=JSON.stringify(incomingCodes.filter(c=>c.o===cur));
+    }
+    codes=incomingCodes;
+    _firstCodesSyncApplied=true;
+    render();
+   }catch(e){}
+   _applyingRemote=false;
+  },err=>{fbDbg("ОШИБКА ПОДПИСКИ (коды): "+(err&&err.code||err&&err.message||err))});
+ }catch(e){fbDbg("ошибка подписки на коды (catch): "+(e&&e.message||e))}
+ // --- Подписка на L_PATH (история реферальных бонусов, см. его объявление выше, stage1_oct25_codes_L_split) -
+ // админ подписывается на ВЕСЬ корень (видит бонусы всех, как и раньше), обычный партнер - только на свой
+ // собственный узел (L/{его id}) - ровно те бонусы, которые ОН ПОЛУЧИЛ (поле .to), как и показывает prt().
+ const lRefPath=_isAdminScope?L_PATH:(L_PATH+"/"+cur);
+ try{
+  DB.ref(lRefPath).on("value",snap=>{
+   _applyingRemote=true;
+   try{
+    const val=snap.val();
+    let incomingL;
+    if(_isAdminScope){
+     Object.keys(val||{}).forEach(id=>{_knownLOwners[id]=true});
+     incomingL=mergeById(flattenOwnerTree(val,true),[]);
+     Object.keys(val||{}).forEach(id=>{_lastSyncedLJSON[id]=JSON.stringify(val[id]||[])});
+    }else{
+     incomingL=Array.isArray(val)?val:[];
+     if(cur){_knownLOwners[cur]=true;_lastSyncedLJSON[cur]=JSON.stringify(incomingL)}
+    }
+    // Сливаем (а не заменяем целиком) с тем, что уже есть локально - по тому же принципу, что и для leads/wd/dm -
+    // собственная, еще не отправленная кросс-владельческая запись (см. creditReward()) не должна затираться.
+    L=mergeById(incomingL,L);
+    _firstLSyncApplied=true;
+    render();
+   }catch(e){}
+   _applyingRemote=false;
+  },err=>{fbDbg("ОШИБКА ПОДПИСКИ (бонусы): "+(err&&err.code||err&&err.message||err))});
+ }catch(e){fbDbg("ошибка подписки на бонусы (catch): "+(e&&e.message||e))}
 }
 const tier=p=>{const i=TIERS.findIndex(t=>p<t.max);return i<0?TIERS.length-1:i};
 const bot=(u,t,b)=>U[u].msgs.push({id:genId(),t,b,ts:Date.now()});
@@ -898,7 +1543,7 @@ function svInfoModal(u){
  <div class="mhd"><b>Описание услуг</b><button onclick="U['${u.id}'].svInfo=false;render()" style="width:28px;height:28px;padding:0;border-radius:50%;line-height:1" aria-label="Закрыть">✕</button></div>
  <div class="mbd">${SERVICES_INFO.map(([n,d])=>{const open=!!(u.svOpen&&u.svOpen[n]);return `<div class="svq"><div class="svq-h${open?" open":""}" onclick="toggleSvInfo('${u.id}','${n.replace(/'/g,"\\'")}')">${esc(n)}<button type="button" class="svtbtn ${open?"op":"cl"}" onclick="event.stopPropagation();toggleSvInfo('${u.id}','${n.replace(/'/g,"\\'")}')">${open?"Свернуть":"Открыть"}</button></div>${open?`<div class="svq-b">${esc(d)}</div>`:""}</div>`}).join("")}</div>
  </div></div>`}
-function sendDmBlocked(){const u=U[cur],to=u.inv;let v=$("dmin").value.trim();if(!v||!to)return;v=cap(v);dm.push({a:u.id,b:to,from:u.id,text:v,ts:Date.now()});render()}
+function sendDmBlocked(){const u=U[cur],to=u.inv;let v=$("dmin").value.trim();if(!v||!to)return;v=cap(v);dm.push({id:genId(),a:u.id,b:to,from:u.id,text:v,ts:Date.now()});render()}
 function blockedView(u){
  const inv=u.inv&&U[u.inv]?U[u.inv]:null;
  if(u.blockedChatOpen&&inv){
@@ -969,7 +1614,7 @@ function addLead(){
  else if(u.errComment)u.errFocus="cm";
  if(u.errFio||u.errPhone||u.errComment||u.errContact)return render();
  if(leads.some(l=>l.ph.replace(/\D/g,"")==p.replace(/\D/g,""))){u.errPhone="Клиент уже передан.";u.errFocus="p";return render()}
- leads.push({id:genNumId(),o:cur,fio:f,ph:p,sv:s,cm,st:MAIN[0],price:0,priceCurrent:0,rw:0,paid:0,note:"",ts:Date.now()});
+ leads.push({id:genNumId(),o:cur,fio:f,ph:p,sv:s,cm,st:MAIN[0],price:0,priceCurrent:0,rw:0,paid:0,note:"",ts:Date.now(),_upd:serverNow()});
  u.form=false;u.lf="";u.lp="";u.lcm="";u.lw="";u.ls=SV[0];
  bot(cur,"Заявка создана! ✅\n"+f+"\n"+p+"\n"+s+"\nСтатус: "+MAIN[0]);render()}
 function upd(i){
@@ -983,7 +1628,7 @@ function upd(i){
  U.admin.err="";
  const statusChanged=l._lastSt!=null&&l._lastSt!==newSt;
  const firstApply=l._lastSt==null;
- l.st=newSt;l.note=newNote;l.priceCurrent=newPriceCurrent;l.rooms=newRooms;l.district=newDistrict;l.year=newYear;l.renovation=newReno;
+ l.st=newSt;l.note=newNote;l.priceCurrent=newPriceCurrent;l.rooms=newRooms;l.district=newDistrict;l.year=newYear;l.renovation=newReno;l._upd=serverNow();
  if(l.st=="Сделка состоялась"){
   if(!newPriceCurrent){U.admin.err="Укажите цену продажи.";return render()}
   if(!l.paid){
@@ -1004,13 +1649,13 @@ function upd(i){
 function creditReward(i){
  const l=leads[i];if(!l.paid||l.credited)return;
  const u=U[l.o],t=l._tier;
- u.bal+=l.rw;u.updatedAt=serverNow();l.credited=1;
+ u.bal+=l.rw;u.updatedAt=serverNow();l.credited=1;l._upd=serverNow();
  // Формат диапазона категории приведен к тому же виду, что в сообщении "Ура! Сделка состоялась" (TIERS[t].n,
  // напр. "30–40 млн") вместо ранее использовавшегся полного написания чисел ("от 30 000 000 до 40 000 000") -
  // см. oct24_message_about_screenshot.3_reward_message_text_and_range_format.
  const rangeTxt="«"+TIERS[t].n+"»";
  bot(l.o,"Вознаграждение! 💸\nВаш баланс пополнен на "+Math.round(l.rw).toLocaleString("ru-RU")+" рублей!\nЗайдите в профиль, чтобы посмотреть достижения и получить выплату.\n\nВаш лимит в категории "+rangeTxt+"\nувеличен: "+l._oldLim.toLocaleString("ru-RU")+" → "+l._newLim.toLocaleString("ru-RU")+".");
- if(u.inv&&u.inv!="admin"){const b=Math.round(l.rw*.1);U[u.inv].bal+=b;U[u.inv].updatedAt=serverNow();L.push({to:u.inv,from:l.o,sum:b});bot(u.inv,"Бонус партнера: +"+rub(b)+" за сделку "+u.nick)}
+ if(u.inv&&u.inv!="admin"){const b=Math.round(l.rw*.1);U[u.inv].bal+=b;U[u.inv].updatedAt=serverNow();L.push({id:genId(),to:u.inv,from:l.o,sum:b});bot(u.inv,"Бонус партнера: +"+rub(b)+" за сделку "+u.nick)}
  render()}
 function wdSetStat(v){const u=U[cur];u.wdStatus=v;u.wdSystem=v=="ИП"?PAYSYS_IP:"";render()}
 function wdSetSys(v){U[cur].wdSystem=v;render()}
@@ -1026,13 +1671,13 @@ function wdFilled(u){const f=wdFieldDefs(u);if(!f.length)return false;
 function wdUpdateBtn(){const b=$("wdSubmitBtn");if(b)b.disabled=!wdFilled(U[cur])}
 function wdSubmit(){const u=U[cur];if(!wdFilled(u))return;
  const sum=+u.wdSum;
- wd.push({id:genId(),o:u.id,w:u.nick,name:u.name,fld:u.fld,s:sum,sys:u.wdSystem,stat:u.wdStatus,fields:{...u.wdFields},status:"pending",comment:"",ts:Date.now()});
+ wd.push({id:genId(),o:u.id,w:u.nick,name:u.name,fld:u.fld,s:sum,sys:u.wdSystem,stat:u.wdStatus,fields:{...u.wdFields},status:"pending",comment:"",ts:Date.now(),_upd:serverNow()});
  u.bal-=sum;u.updatedAt=serverNow();u.wdForm=false;u.wdReqForm=false;u.wdFields={};u.wdSum="";u.wdStatus="";u.wdSystem="";
  bot(u.id,"Заявка на вывод средств успешно создана. 🏦");render()}
 function wdSetOpen(i){wd[i]._open=!wd[i]._open;render()}
 function wdDecide(i,dec){
  const r=wd[i];if(r.status!=="pending")return;
- const c=$("wdc"+i);r.comment=c?c.value.trim():"";r.status=dec;
+ const c=$("wdc"+i);r.comment=c?c.value.trim():"";r.status=dec;r._upd=serverNow();
  const u=U[r.o];if(dec=="rejected"){u.bal+=r.s;u.updatedAt=serverNow()}
  // Одобрение заявки на вывод означает, что реальная выплата партнеру произошла - поэтому все его сделки,
  // вознаграждение по которым уже начислено на баланс (credited), но еще не отмечены как выплаченные,
@@ -1040,7 +1685,7 @@ function wdDecide(i,dec){
  // "Начислено" в списке заявок. Привязки конкретной заявки на вывод к конкретной сделке в приложении нет
  // (партнер выводит общую сумму с баланса, а не выбирает сделки) - поэтому при одобрении считаем выплаченным
  // все, что на данный момент начислено и еще не отмечено, что для единого "общего кошелька" партнера корректно.
- if(dec=="approved")leads.forEach(l=>{if(l.o==r.o&&l.credited&&!l.paidOut)l.paidOut=true});
+ if(dec=="approved")leads.forEach(l=>{if(l.o==r.o&&l.credited&&!l.paidOut){l.paidOut=true;l._upd=serverNow()}});
  bot(r.o,(dec=="approved"?"Заявка на вывод "+rub(r.s)+" одобрена.":"Заявка на вывод "+rub(r.s)+" отклонена.")+(r.comment?"\nКомментарий: "+r.comment:""));
  render()}
 // Плашки прогресса выплаты вознаграждения по сделке - того же типа/цвета, что и у статуса "Сделка состоялась"
@@ -1051,11 +1696,11 @@ function payoutTags(l){
  return (l.credited?' <span class="tag st-green">Начислено</span>':"")+(l.paidOut?' <span class="tag st-green">Выплачено</span>':"")}
 function contactsOf(u){const s=[];if(u.inv&&u.inv!="admin")s.push(u.inv);Object.values(U).forEach(x=>{if(x.id!="admin"&&x.inv==u.id)s.push(x.id)});return[...new Set(s)]}
 function hasDm(a,b){return dm.some(x=>(x.a==a&&x.b==b)||(x.a==b&&x.b==a))}
-function sendDm(){const u=U[cur],to=u.activeChat;let v=$("dmin").value.trim();if(!v||!to||to=="self")return;v=cap(v);dm.push({a:u.id,b:to,from:u.id,text:v,ts:Date.now()});render()}
+function sendDm(){const u=U[cur],to=u.activeChat;let v=$("dmin").value.trim();if(!v||!to||to=="self")return;v=cap(v);dm.push({id:genId(),a:u.id,b:to,from:u.id,text:v,ts:Date.now()});render()}
 function askPartner(){const u=U[cur];if(!(u.inv&&u.inv!="admin"))return;
- dm.push({a:u.id,b:u.inv,from:u.id,text:"Привет! Я "+(u.name||u.nick)+", ты пригласил меня в партнерку. Подскажешь по выводу средств?",ts:Date.now()});
+ dm.push({id:genId(),a:u.id,b:u.inv,from:u.id,text:"Привет! Я "+(u.name||u.nick)+", ты пригласил меня в партнерку. Подскажешь по выводу средств?",ts:Date.now()});
  u.wdForm=false;u.activeChat=u.inv;u.tab="Чаты";render()}
-function tab(t){U[cur].tab=t;render()}
+function tab(t){U[cur].tab=t;if(t==="Партнеры"&&U[cur].id!=="admin")refreshRefLeads(cur);render()}
 function render(){
  if(_showLoadingGate){
   // Пока не пришел первый ответ от базы - не показываем вообще никакой экран, зависящий от состояния
@@ -1091,7 +1736,7 @@ function render(){
  const c=$("cl");if(c)c.scrollTop=c.scrollHeight;
  if(u.errFocus){const el=$(u.errFocus);if(el){el.focus();if(el.select)el.select()}u.errFocus=null}
  renderQR();
- if(!_applyingRemote)scheduleSync()}
+ if(!_applyingRemote){scheduleSync();scheduleLeadsSync();scheduleWdSync();scheduleUsersSync();scheduleProfilesSync();scheduleDmSync();scheduleCodesSync();scheduleLSync()}}
 // Полоса шагов над формой регистрации/активации - оставлены только "Регистрация"/"Активация" (по запросу
 // убраны "Обучение"/"Работа"). Каждый <span> в .st уже имеет flex:1 (см. CSS), поэтому с двумя шагами вместо
 // четырех они автоматически растягиваются и занимают каждый половину ширины, без отдельных правок CSS.
@@ -1126,8 +1771,12 @@ function doReg(){const u=U[cur],nk=$("rn").value.trim(),nm=$("rm").value.trim(),
  u.nick=nk[0]=="@"?nk:"@"+nk;u.name=nm;u.fld=fl;u.reg=true;u.regTs=Date.now();u.updatedAt=serverNow();u.rnVal="";u.rmVal="";u.rfVal="";render()}
 function act(){const u=U[cur],m=$("ac").value.trim().match(/^(\S+)$/i),k=m?codes.findIndex(x=>x.c==m[1].toUpperCase()):-1;
  if(k<0){u.err="Неверная команда или код уже использован.";return render()}
- if(codes[k].ts&&(serverNow()-codes[k].ts)>CODE_TTL_MS){codes.splice(k,1);u.err="Код устарел, просьба ввести новый код активации.";return render()}
- u.inv=codes[k].o;codes.splice(k,1);u.err="";u.codeOk=true;u.updatedAt=serverNow();render()}
+ // Код, который мы сейчас удаляем (по истечении TTL или по факту использования), почти всегда принадлежит
+ // ДРУГОМУ владельцу (codes[k].o) - см. комментарий у CODES_PATH/removeCodeFromOwnerPath() выше. Локально
+ // убираем его немедленно (как и раньше), а удаление на сервере в ЧУЖОМ узле делаем безопасно через
+ // transaction()-слияние по значению кода, а не прямой записью в чужой путь.
+ if(codes[k].ts&&(serverNow()-codes[k].ts)>CODE_TTL_MS){const cv=codes[k].c,ow=codes[k].o;codes.splice(k,1);removeCodeFromOwnerPath(ow,cv);u.err="Код устарел, просьба ввести новый код активации.";return render()}
+ const cv=codes[k].c,ow=codes[k].o;u.inv=codes[k].o;codes.splice(k,1);removeCodeFromOwnerPath(ow,cv);u.err="";u.codeOk=true;u.updatedAt=serverNow();render()}
 // Сканирование QR-кода приглашения камерой устройства - полностью внутри мини-приложения, через
 // нативный Telegram WebApp API (TG.showScanQrPopup), без браузерных разрешений getUserMedia и без
 // сторонних библиотек/сайтов: камеру и сам процесс сканирования показывает интерфейс самого Telegram.
@@ -1324,13 +1973,19 @@ function req(u){
  </div></div>`:"";
  return f+controls+`<div id="pLeadsList">${reqLeadsListHtml(u)}</div>`}
 function prt(u){
+ // Заявки РЕФЕРАЛОВ (партнеров, приглашенных этим же партнером) больше не приходят вместе с общим состоянием -
+ // они лежат в отдельном узле на владельца (см. LEADS_PATH) и подгружаются разовым запросом по требованию в
+ // _refLeadsCache (см. refreshRefLeads(), вызывается при открытии вкладки "Партнеры" и при открытии конкретного
+ // реферала) - именно поэтому здесь используется кэш, а не глобальный массив leads (в котором у партнера
+ // теперь, в отличие от раньше, есть только ЕГО СОБСТВЕННЫЕ заявки, а не заявки вообще всех).
  if(u.viewPartner&&U[u.viewPartner]&&U[u.viewPartner].inv==u.id){
   const p=U[u.viewPartner];
-  const ls=leads.filter(l=>l.o==p.id).map(l=>`<div class="c lcard">
+  const refLeads=_refLeadsCache[p.id]||[];
+  const ls=refLeads.map(l=>`<div class="c lcard">
  <div class="lrow"><span>Статус</span><span><span class="tag ${stColor(l.st)}">${l.st}</span></span></div>
  <div class="lrow"><span>Способ продажи</span><span>${l.sv}</span></div>
  ${l.note?`<div class="lrow"><span>Комментарий</span><span>${esc(l.note)}</span></div>`:""}
- </div>`).join("")||'<div class="mu">Заявок пока нет.</div>';
+ </div>`).join("")||(_refLeadsCache[p.id]?'<div class="mu">Заявок пока нет.</div>':'<div class="mu">Загрузка…</div>');
   return `<button onclick="U['${u.id}'].viewPartner=null;render()">← Назад к партнерам</button>
  <div class="c"><div class="r" style="justify-content:space-between;align-items:center">
  <div><div style="font-weight:600">${p.nick}</div><div class="mu">${esc(p.name)||"—"}</div></div>
@@ -1339,8 +1994,8 @@ function prt(u){
  }
  const my=codes.filter(c=>c.o==u.id);
  const ps=Object.values(U).filter(x=>x.inv==u.id);
- const rows=ps.map(p=>{const ls=leads.filter(l=>l.o==p.id),d=ls.filter(l=>l.paid).length,b=L.filter(x=>x.to==u.id&&x.from==p.id).reduce((a,x)=>a+x.sum,0),last=ls.length?Math.max(...ls.map(l=>l.ts||0)):0;
- return `<tr style="cursor:pointer" onclick="U['${u.id}'].viewPartner='${p.id}';render()"><td>${p.nick}${p.on?"":" ⏳"}</td><td>${ls.length}</td><td>${d}</td><td>${rub(b)}</td><td class="mu">${fmtAgo(last)}</td></tr>`}).join("");
+ const rows=ps.map(p=>{const ls=_refLeadsCache[p.id]||[],d=ls.filter(l=>l.paid).length,b=L.filter(x=>x.to==u.id&&x.from==p.id).reduce((a,x)=>a+x.sum,0),last=ls.length?Math.max(...ls.map(l=>l.ts||0)):0;
+ return `<tr style="cursor:pointer" onclick="U['${u.id}'].viewPartner='${p.id}';refreshRefLeads('${u.id}');render()"><td>${p.nick}${p.on?"":" ⏳"}</td><td>${ls.length}</td><td>${d}</td><td>${rub(b)}</td><td class="mu">${fmtAgo(last)}</td></tr>`}).join("");
  const myCode=my.find(c=>c.c!=="START-0001")||null;
  return `<div class="c"><b>Пригласить партнера</b><p class="mu">Одноразовый код. Партнер вводит его при регистрации. Если партнер рядом — покажите ему QR-код для сканирования и быстрой регистрации.<br><u>Код действует 5 минут после создания.</u></p>
  <div class="r" style="align-items:stretch">
@@ -1469,7 +2124,12 @@ function adminResetAll(){
  }
  _resetArmed=false;clearTimeout(_resetArmTimer);
  _forceFullOverwrite=true; // полный сброс должен реально стереть данные в общей базе, а не слиться со старыми
+ _forceLeadsOverwrite=true;_forceWdOverwrite=true; // то же самое, но для отдельных путей leads/wd (см. выше)
+ _forceUsersOverwrite=true;_forceProfilesOverwrite=true; // то же самое, но для users/profiles (см. выше)
+ _forceDmOverwrite=true; // то же самое, но для переписки (dm, см. DM_PATH выше)
+ _forceCodesOverwrite=true;_forceLOverwrite=true; // то же самое, но для кодов/бонусов (codes/L, см. CODES_PATH/L_PATH выше)
  const now=Date.now();leads.forEach(l=>{tombstones.leads[l.id]=now}); // см. fix_cross_device_delete_race_oct23
+ wd.forEach(w=>{tombstones.wd[w.id]=now}); // см. tombstones.wd выше
  leads=[];wd=[];L=[];dm=[];codes=[{c:"START-0001",o:"admin"}];
  Object.keys(U).forEach(id=>{if(id!=="admin")delete U[id]});
  U.p1=mk("p1","@alexey",true,"admin");U.p1.msgs.push({id:genId(),t:ONB,b:1,ts:Date.now()});
@@ -1504,6 +2164,7 @@ function adminClearLeadsHistory(){
  }
  _clearLeadsArmed=0;clearTimeout(_clearLeadsArmTimer);
  _forceFullOverwrite=true; // намеренное удаление - слияние (см. scheduleSync) здесь недопустимо, см. adminResetAll
+ _forceLeadsOverwrite=true; // то же самое, но для отдельного пути leads (см. LEADS_PATH выше)
  // "Надгробия" на все удаляемые id - защита от воскрешения заявок при синхронизации с ДРУГОГО устройства
  // партнера (см. комментарий в scheduleSync()/fix_cross_device_delete_race_oct23), независимо от того, успел
  // ли дойти до него этот момент УЖЕ немедленной (не ждущей debounce) записи, см. fix предыдущего сообщения.
@@ -1523,6 +2184,7 @@ function adminDeleteSelectedLeads(){
  // историю"/"Сбросить все тестовые данные", поэтому слияние (см. scheduleSync) здесь так же недопустимо -
  // иначе удаленные заявки "воскреснут" при следующей синхронизации с другого устройства.
  _forceFullOverwrite=true;
+ _forceLeadsOverwrite=true; // то же самое, но для отдельного пути leads (см. LEADS_PATH выше)
  const now=Date.now();Object.keys(_selLeads).forEach(id=>{tombstones.leads[id]=now}); // см. fix_cross_device_delete_race_oct23
  leads=leads.filter(l=>!_selLeads[l.id]);
  _selLeads={};

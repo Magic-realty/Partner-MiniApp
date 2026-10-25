@@ -95,6 +95,7 @@ oct24): этого тега раньше не было вообще - window.Tel
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-app-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-database-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-auth-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/firebase@10.14.1/firebase-functions-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qr-code-styling@1.9.2/lib/qr-code-styling.min.js"></script>
 <script>
 const TG=window.Telegram&&window.Telegram.WebApp;try{TG&&(TG.ready(),TG.expand())}catch(e){}
@@ -193,7 +194,17 @@ function getTgUser(){
   return userRaw?JSON.parse(userRaw):null;
  }catch(e){return null}
 }
+// stage2_oct25_telegram_auth: та же самодельная разборка location.hash/search, но возвращает ВСЮ строку
+// initData целиком (а не только поле user, как getTgUser() выше) - именно ее целиком, без изменений, должна
+// проверить облачная функция telegramLogin (см. firebase-stage2/functions/index.js) по подписи Telegram.
+function getTgInitDataRaw(){
+ try{
+  let raw=(location.hash.match(/tgWebAppData=([^&]*)/)||location.search.match(/tgWebAppData=([^&]*)/)||[])[1];
+  return raw?decodeURIComponent(raw):null;
+ }catch(e){return null}
+}
 const TG_USER=getTgUser();
+const TG_INIT_RAW_STRING=getTgInitDataRaw();
 const IS_ADMIN_TG_ACCOUNT=!!(TG_USER&&TG_USER.username&&TG_USER.username.toLowerCase()===ADMIN_TG_USERNAME.toLowerCase());
 // --- Привязка каждого реального партнера в Telegram к его собственному стабильному ID (чтобы разные партнеры не "слипались" в одного демо-пользователя p2) ---
 const REAL_USER_ID=(IS_IN_TELEGRAM&&TG_USER&&TG_USER.id)?(IS_ADMIN_TG_ACCOUNT?"admin":("tg"+TG_USER.id)):null;
@@ -299,15 +310,69 @@ function fbDbg(t){try{const d=document.getElementById("fbDebug");if(d)d.textCont
 // ".info/serverTimeOffset" - специальный путь Firebase, который отдает разницу между часами этого устройства
 // и часами сервера, без необходимости что-либо записывать в базу.
 function serverNow(){return Date.now()+_serverTimeOffset}
+// --- stage2_oct25_telegram_auth: раньше вход в Firebase был АНОНИМНЫМ - у каждого устройства был свой случайный
+// uid, никак не привязанный к Telegram-id, и клиент мог прислать базе ЛЮБОЙ путь (например users/tg999999) - сама
+// база не могла проверить, что это действительно владелец этого пути (см. аудит oct24 - подмена пути в браузере).
+// Теперь: внутри Telegram клиент передает "сырую" строку initData (её подписывает сам Telegram секретным ключом
+// бота при КАЖДОМ запуске мини-приложения) на облачную функцию telegramLogin (см. firebase-stage2/functions/
+// index.js) - функция проверяет эту подпись и, если она верна, выдает "честный" custom-токен с uid = настоящий
+// Telegram-id ("admin" для администратора). Подделать uid без знания токена бота невозможно - именно на этом uid
+// теперь опираются Security Rules (см. firebase-stage2/database.rules.json). ВНЕ Telegram (демо-режим в обычном
+// браузере/артефакте) настоящая продуктовая база больше вообще НЕ используется по умолчанию - анонимный вход не
+// может отличить "это тестирую я" от "это чужой человек притворяется тестировщиком", оба выглядят для базы
+// одинаково, поэтому оставлять анонимному входу хоть какой-то доступ к настоящим данным обесценило бы всю защиту
+// этого раунда. Демо-режим подключается к НАСТОЯЩЕЙ базе только если явно включен ?emulator=1 - и тогда это
+// Firebase Local Emulator Suite (локальная, временная, бесплатная база на компьютере разработчика), а не
+// продуктовый проект.
+let _authFatalError="";
+function _initFirebaseAuth(){
+ if(IS_IN_TELEGRAM){
+  DB=firebase.database();
+  const initDataRaw=(TG&&TG.initData)||TG_INIT_RAW_STRING;
+  if(!initDataRaw){
+   _authFatalError="Не удалось получить данные запуска Telegram (initData). Закройте приложение и откройте его заново через Telegram.";
+   fbDbg("нет initData - невозможно подтвердить вход");
+   return;
+  }
+  try{
+   const callable=firebase.app().functions("europe-west1").httpsCallable("telegramLogin");
+   callable({initData:initDataRaw}).then(res=>firebase.auth().signInWithCustomToken(res.data.token))
+    .catch(e=>{
+     _authFatalError="Не удалось подтвердить подлинность запуска через Telegram ("+(e&&e.code||e&&e.message||e)+"). Закройте приложение и откройте его заново через Telegram.";
+     fbDbg("ошибка telegramLogin: "+(e&&e.code||e&&e.message||e));
+     render();
+    });
+  }catch(e){
+   _authFatalError="Ошибка проверки входа: "+(e&&e.message||e);
+   fbDbg("ошибка вызова telegramLogin (catch): "+(e&&e.message||e));
+  }
+ }else{
+  let useEmulator=false;try{useEmulator=location.search.includes("emulator=1")||location.hash.includes("emulator=1")}catch(e){}
+  if(useEmulator){
+   try{
+    DB=firebase.database();
+    DB.useEmulator("localhost",9000);
+    firebase.auth().useEmulator("http://localhost:9099");
+    firebase.auth().signInAnonymously().catch(e=>fbDbg("ошибка анонимного входа (эмулятор): "+(e&&e.code||e)));
+    fbDbg("демо-режим подключен к ЛОКАЛЬНОМУ эмулятору (localhost) - не к настоящей базе");
+   }catch(e){DB=null;fbDbg("ошибка подключения к эмулятору: "+(e&&e.message||e))}
+  }else{
+   // По умолчанию демо-режим вообще НЕ подключается к Firebase - работает полностью локально (как если бы
+   // базы не было вовсе, см. graceful fallback у _showLoadingGate) - настоящая продуктовая база вне Telegram
+   // теперь недостижима в принципе.
+   DB=null;
+   fbDbg("демо-режим: без подключения к базе (полностью локально, см. ?emulator=1 для теста с эмулятором)");
+  }
+ }
+}
 try{
  if(typeof firebase==="undefined"){
   fbDbg("скрипт Firebase не загрузился (typeof firebase === undefined)");
  }else{
   firebase.initializeApp(FIREBASE_CONFIG);
-  DB=firebase.database();
   fbDbg("инициализирован, жду ответа от базы...");
-  if(firebase.auth)firebase.auth().signInAnonymously().catch(e=>fbDbg("ошибка анонимного входа: "+(e&&e.code||e)));
-  try{DB.ref(".info/serverTimeOffset").on("value",snap=>{_serverTimeOffset=snap.val()||0})}catch(e){}
+  _initFirebaseAuth();
+  if(DB)try{DB.ref(".info/serverTimeOffset").on("value",snap=>{_serverTimeOffset=snap.val()||0})}catch(e){}
  }
 }catch(e){DB=null;fbDbg("ошибка инициализации: "+(e&&e.message||e))}
 // Срок жизни одноразового кода приглашения - 5 минут (возвращено по явной просьбе; срок тут ни при чем -
@@ -1702,6 +1767,21 @@ function askPartner(){const u=U[cur];if(!(u.inv&&u.inv!="admin"))return;
  u.wdForm=false;u.activeChat=u.inv;u.tab="Чаты";render()}
 function tab(t){U[cur].tab=t;if(t==="Партнеры"&&U[cur].id!=="admin")refreshRefLeads(cur);render()}
 function render(){
+ if(_authFatalError){
+  // stage2_oct25_telegram_auth: подтверждение подлинности через Telegram не удалось (подпись не прошла,
+  // облачная функция недоступна, истекла initData и т.п.) - дальше пускать нельзя, т.к. без настоящего
+  // custom-токена Security Rules не дадут прочитать/записать НИЧЕГО чувствительного (это и есть их задача),
+  // а показывать обычный интерфейс "как будто все хорошо" при полностью неработающей базе только запутает
+  // партнера. Экран блокирует всё, как и _showLoadingGate ниже, но с понятным текстом и кнопкой "Повторить".
+  $("hd").textContent="Ошибка входа";
+  $("nv").innerHTML="";
+  $("bd").innerHTML='<div class="c" style="text-align:center;padding:48px 10px">'
+   +'<div style="font-size:15px;margin-bottom:12px">'+_authFatalError+'</div>'
+   +'<button class="btn" onclick="location.reload()">Повторить</button>'
+   +'</div>';
+  $("modal").innerHTML="";
+  return;
+ }
  if(_showLoadingGate){
   // Пока не пришел первый ответ от базы - не показываем вообще никакой экран, зависящий от состояния
   // пользователя (регистрация/активация/код-пароль/обычный интерфейс), чтобы не мигнуть неверным экраном
